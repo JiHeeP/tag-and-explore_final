@@ -1,0 +1,9 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/((?!recovered-deploy/|placeholder.svg|robots.txt|favicon.ico).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
