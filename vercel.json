@@ -2,7 +2,15 @@
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/((?!recovered-deploy/|placeholder.svg|robots.txt|favicon.ico).*)",
+      "source": "/view/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/editor",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/editor/:path*",
       "destination": "/index.html"
     }
   ]
