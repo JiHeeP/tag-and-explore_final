@@ -131,10 +131,6 @@ async function saveProject(project) {
   if (error) throw new Error(error.message);
 }
 
-async function deleteProject(id) {
-  await supabase.from("projects").delete().eq("id", id);
-}
-
 async function uploadFile(file) {
   const extension = file.name.split(".").pop() || "bin";
   const path = `${crypto.randomUUID()}.${extension}`;
@@ -192,12 +188,6 @@ function Home() {
 
   useEffect(refresh, [refresh]);
 
-  async function handleDelete(id) {
-    await deleteProject(id);
-    forgetToken(id);
-    refresh();
-  }
-
   return (
     <main className="page">
       <AppHeader>
@@ -248,9 +238,6 @@ function Home() {
                     </Button>
                     <Button variant="ghost" onClick={() => navigate(`/view/${project.id}`)}>
                       View
-                    </Button>
-                    <Button variant="danger" onClick={() => handleDelete(project.id)}>
-                      <Trash2 size={15} />
                     </Button>
                   </div>
                 </div>
