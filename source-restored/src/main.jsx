@@ -132,14 +132,27 @@ async function saveProject(project) {
 }
 
 async function uploadFile(file) {
-  const extension = file.name.split(".").pop() || "bin";
-  const path = `${crypto.randomUUID()}.${extension}`;
-  const { error } = await supabase.storage.from("project-images").upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      resolve(result.split(",")[1] || "");
+    };
+    reader.onerror = () => reject(new Error("Could not read the selected file."));
+    reader.readAsDataURL(file);
   });
-  if (error) throw new Error(error.message);
-  return supabase.storage.from("project-images").getPublicUrl(path).data.publicUrl;
+  const response = await fetch("/api/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fileName: file.name,
+      contentType: file.type || "application/octet-stream",
+      base64,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.url) throw new Error(result.error || "Upload failed.");
+  return result.url;
 }
 
 function parseEmbed(code) {

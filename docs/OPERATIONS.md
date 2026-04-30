@@ -54,3 +54,31 @@ The safest emergency setting is:
 That will protect existing shared links, but it will also stop the current browser-only editor from saving until a proper login or server-side save flow is added.
 
 Use `supabase/policies-readonly-lockdown.sql` in the Supabase SQL editor for that emergency lock.
+
+## Cloudflare R2 file uploads
+
+New uploads should go to Cloudflare R2, while project rows stay in Supabase.
+
+R2 bucket:
+
+```text
+tag-and-explore-assets
+```
+
+Public file base URL:
+
+```text
+https://pub-b6a81f0a6fd448998e4c7f92d5ddb388.r2.dev
+```
+
+Server environment variables required for uploads:
+
+```text
+R2_ACCOUNT_ID
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_BUCKET
+R2_PUBLIC_BASE_URL
+```
+
+Never put `R2_SECRET_ACCESS_KEY` in frontend code. The browser uploads through `/api/upload`, and that server function sends the file to R2.
