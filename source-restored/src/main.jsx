@@ -25,7 +25,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import "./styles.css";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://shdnckyubwgkwmpx.supabase.co";
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://bnpxshdnckyubwgkwmpx.supabase.co";
 const supabaseKey =
   import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_b9uy6XuIZHKou9z89suVLA_EkOgnGtO";
 const supabase = createClient(supabaseUrl, supabaseKey, {
