@@ -87,6 +87,13 @@ Never put `R2_SECRET_ACCESS_KEY` in frontend code. The browser uploads through `
 
 The app now uses Supabase Auth for email/password login.
 
+Current owner account:
+
+```text
+newgirl900@naver.com
+90276ea9-4119-4067-ace3-6da725d9f885
+```
+
 Project rows use:
 
 ```text

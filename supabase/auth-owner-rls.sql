@@ -1,7 +1,8 @@
 -- Login-based ownership rules for Tag and Explore.
 --
 -- Owner user created in Supabase Auth:
--- 7d455b2a-eed1-4808-adb1-5c004e588b8f
+-- newgirl900@naver.com
+-- 90276ea9-4119-4067-ace3-6da725d9f885
 
 alter table public.projects
   add column if not exists owner_id uuid references auth.users(id) on delete set null;
@@ -10,12 +11,12 @@ create index if not exists projects_owner_id_idx on public.projects(owner_id);
 
 -- Move existing recovered projects under the owner account.
 update public.projects
-set owner_id = '7d455b2a-eed1-4808-adb1-5c004e588b8f'
+set owner_id = '90276ea9-4119-4067-ace3-6da725d9f885'
 where owner_id is null
   and exists (
     select 1
     from auth.users
-    where id = '7d455b2a-eed1-4808-adb1-5c004e588b8f'
+    where id = '90276ea9-4119-4067-ace3-6da725d9f885'
   );
 
 alter table public.projects enable row level security;
