@@ -13,12 +13,14 @@ import {
   Globe2,
   Info,
   Link as LinkIcon,
+  LogOut,
   Plus,
   Save,
   Share2,
   Sparkles,
   Trash2,
   Upload,
+  User,
   X,
 } from "lucide-react";
 import * as THREE from "three";
@@ -33,7 +35,6 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 const defaultColor = "#7c3aed";
-const tokenStorageKey = "tag-and-explore:project-edit-tokens";
 const markerColors = ["#7c3aed", "#2563eb", "#0891b2", "#16a34a", "#f59e0b", "#ef4444", "#ec4899", "#111827"];
 const icons = [
   { value: "info", label: "Info", icon: Info },
@@ -74,31 +75,6 @@ function normalizeHotspots(hotspots = []) {
   });
 }
 
-function readTokens() {
-  try {
-    return JSON.parse(localStorage.getItem(tokenStorageKey) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function rememberToken(id, token) {
-  const tokens = readTokens();
-  tokens[id] = token;
-  localStorage.setItem(tokenStorageKey, JSON.stringify(tokens));
-}
-
-function forgetToken(id) {
-  const tokens = readTokens();
-  delete tokens[id];
-  localStorage.setItem(tokenStorageKey, JSON.stringify(tokens));
-}
-
-function getToken(id) {
-  const token = readTokens()[id];
-  return typeof token === "string" ? token : null;
-}
-
 function projectFromRow(row) {
   return {
     id: row.id,
@@ -106,12 +82,14 @@ function projectFromRow(row) {
     imageUrl: row.image_url,
     hotspots: normalizeHotspots(row.hotspots || []),
     backgroundType: row.background_type || "image",
+    ownerId: row.owner_id || null,
     createdAt: new Date(row.created_at).getTime(),
   };
 }
 
-async function listProjects() {
-  const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
+async function listProjects(userId) {
+  if (!userId) return [];
+  const { data, error } = await supabase.from("projects").select("*").eq("owner_id", userId).order("created_at", { ascending: false });
   return error ? [] : (data || []).map(projectFromRow);
 }
 
@@ -120,13 +98,15 @@ async function loadProject(id) {
   return error || !data ? null : projectFromRow(data);
 }
 
-async function saveProject(project) {
+async function saveProject(project, userId) {
+  if (!userId) throw new Error("Please log in before saving.");
   const { error } = await supabase.from("projects").upsert({
     id: project.id,
     name: project.name,
     image_url: project.imageUrl,
     hotspots: normalizeHotspots(project.hotspots),
     background_type: project.backgroundType,
+    owner_id: userId,
   });
   if (error) throw new Error(error.message);
 }
@@ -175,6 +155,93 @@ function Button({ variant = "primary", className = "", ...props }) {
   return <button className={`button ${variant} ${className}`} {...props} />;
 }
 
+function credentialToEmail(value) {
+  return value.trim().toLowerCase();
+}
+
+function useAuth() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session || null);
+      setLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession || null);
+      setLoading(false);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  return { session, user: session?.user || null, loading };
+}
+
+function AuthPanel({ user, loading }) {
+  const [mode, setMode] = useState("login");
+  const [credential, setCredential] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!credential.trim() || !password) return;
+    setBusy(true);
+    try {
+      const email = credentialToEmail(credential);
+      const result =
+        mode === "login"
+          ? await supabase.auth.signInWithPassword({ email, password })
+          : await supabase.auth.signUp({ email, password });
+      if (result.error) throw new Error(result.error.message);
+      if (mode === "signup" && !result.data.session) {
+        alert("Account created. Check your email if Supabase asks for confirmation, then log in.");
+      }
+      setPassword("");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Authentication failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signOut() {
+    setBusy(true);
+    await supabase.auth.signOut();
+    setBusy(false);
+  }
+
+  if (loading) return <p className="muted">Checking login...</p>;
+  if (user) {
+    return (
+      <div className="auth-status">
+        <User size={16} />
+        <span>{user.email || "Logged in"}</span>
+        <Button variant="secondary" onClick={signOut} disabled={busy}>
+          <LogOut size={16} /> Log out
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <form className="auth-panel" onSubmit={submit}>
+      <div className="segmented compact">
+        <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
+          Log in
+        </button>
+        <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>
+          Sign up
+        </button>
+      </div>
+      <input value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="Email" />
+      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" />
+      <Button disabled={busy}>{busy ? "Please wait..." : mode === "login" ? "Log in" : "Sign up"}</Button>
+    </form>
+  );
+}
+
 function AppHeader({ children }) {
   return (
     <header className="app-header">
@@ -187,26 +254,34 @@ function AppHeader({ children }) {
   );
 }
 
-function Home() {
+function Home({ user, authLoading }) {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(() => {
-    listProjects().then((items) => {
+    if (!user) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+    listProjects(user.id).then((items) => {
       setProjects(items);
       setLoading(false);
     });
-  }, []);
+  }, [user]);
 
   useEffect(refresh, [refresh]);
 
   return (
     <main className="page">
       <AppHeader>
-        <Button onClick={() => navigate("/editor")}>
-          <Plus size={17} /> New Project
-        </Button>
+        <AuthPanel user={user} loading={authLoading} />
+        {user && (
+          <Button onClick={() => navigate("/editor")}>
+            <Plus size={17} /> New Project
+          </Button>
+        )}
       </AppHeader>
       <section className="hero">
         <div className="eyebrow">
@@ -216,9 +291,13 @@ function Home() {
           Make any image <span>interactive</span>
         </h1>
         <p>Upload images, 360 panoramas, or 3D models. Add clickable hotspots with text, links, embeds, and galleries.</p>
-        <Button className="large" onClick={() => navigate("/editor")}>
-          <Plus size={20} /> Create Now
-        </Button>
+        {user ? (
+          <Button className="large" onClick={() => navigate("/editor")}>
+            <Plus size={20} /> Create Now
+          </Button>
+        ) : (
+          <p className="muted">Log in or sign up first to create and edit your own projects.</p>
+        )}
       </section>
       <section className="steps">
         {[
@@ -235,7 +314,9 @@ function Home() {
       </section>
       <section className="projects">
         <h2>Projects</h2>
-        {loading ? (
+        {!user ? (
+          <p className="muted">Log in to see your projects. Shared view links still open without logging in.</p>
+        ) : loading ? (
           <p className="muted">Loading projects...</p>
         ) : projects.length ? (
           <div className="project-grid">
@@ -541,15 +622,14 @@ function Inspector({ hotspot, onChange, onDelete }) {
   );
 }
 
-function Editor() {
+function Editor({ user, authLoading }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const idParam = params.get("id");
-  const tokenParam = params.get("token");
   const [projectId, setProjectId] = useState(idParam || crypto.randomUUID());
-  const [token, setToken] = useState(tokenParam || "");
   const [name, setName] = useState("Untitled Project");
   const [imageUrl, setImageUrl] = useState(null);
+  const [ownerId, setOwnerId] = useState(null);
   const [hotspots, setHotspots] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [activeContentId, setActiveContentId] = useState(null);
@@ -558,31 +638,24 @@ function Editor() {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
-  const canEdit = !!token;
+  const canEdit = !!user && (!ownerId || ownerId === user.id);
   const editingEnabled = canEdit && editing;
 
   useEffect(() => {
     if (idParam) {
-      const remembered = getToken(idParam);
-      const nextToken = tokenParam || remembered || "";
       setProjectId(idParam);
-      setToken(nextToken);
-      setEditing(!!nextToken);
-      if (nextToken) rememberToken(idParam, nextToken);
       loadProject(idParam).then((project) => {
         if (!project) return;
         setName(project.name);
         setImageUrl(project.imageUrl);
+        setOwnerId(project.ownerId);
         setHotspots(project.hotspots);
         setBackgroundType(project.backgroundType);
       });
       return;
     }
-    const nextToken = tokenParam || crypto.randomUUID();
-    setToken(nextToken);
-    rememberToken(projectId, nextToken);
-    if (!tokenParam) navigate(`/editor?id=${projectId}&token=${nextToken}`, { replace: true });
-  }, [idParam, tokenParam, projectId, navigate]);
+    setOwnerId(user?.id || null);
+  }, [idParam, user]);
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId) || null;
 
@@ -639,9 +712,9 @@ function Editor() {
   }
 
   async function handleSave() {
-    if (!canEdit || !imageUrl) return;
-    await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType });
-    rememberToken(projectId, token);
+    if (!canEdit || !imageUrl || !user) return;
+    await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType }, user.id);
+    setOwnerId(user.id);
     alert("Project saved successfully.");
   }
 
@@ -650,11 +723,6 @@ function Editor() {
     await handleSave();
     await navigator.clipboard.writeText(`${window.location.origin}/view/${projectId}`);
     alert("View link copied.");
-  }
-
-  async function copyEditLink() {
-    await navigator.clipboard.writeText(`${window.location.origin}/editor?id=${projectId}&token=${token}`);
-    alert("Edit link copied.");
   }
 
   const stage = useMemo(() => {
@@ -685,6 +753,7 @@ function Editor() {
           <input className="title-input" value={name} disabled={!canEdit} onChange={(event) => setName(event.target.value)} />
         </div>
         <div className="toolbar">
+          <AuthPanel user={user} loading={authLoading} />
           <div className="segmented compact">
             {[
               ["image", "Image", FileImage],
@@ -720,7 +789,6 @@ function Editor() {
             <>
               <Button variant="secondary" onClick={handleSave}><Save size={16} /> Save</Button>
               <Button variant="secondary" onClick={copyViewLink}><Share2 size={16} /> Share</Button>
-              <Button variant="secondary" onClick={copyEditLink}><LinkIcon size={16} /> Edit Link</Button>
             </>
           )}
           {canEdit && (
@@ -739,14 +807,19 @@ function Editor() {
           )}
         </div>
       </header>
-      {!canEdit && <div className="readonly">This editor link is read-only. Use your private edit link to make changes.</div>}
+      {!user && <div className="readonly">Log in to create or edit projects. Shared view links are still read-only.</div>}
+      {user && ownerId && ownerId !== user.id && <div className="readonly">This project belongs to another account, so it is read-only for you.</div>}
       <div className="editor-grid">
         <aside className="sidebar">
           <h3>Hotspots</h3>
           <p>{editingEnabled ? "Select a hotspot to edit it. Click the canvas to place a new one." : "This shared project is view-only."}</p>
           {hotspots.length ? (
             hotspots.map((hotspot, index) => (
-              <button className={`hotspot-row ${selectedId === hotspot.id ? "active" : ""}`} key={hotspot.id} onClick={() => setSelectedId(hotspot.id)}>
+              <button
+                className={`hotspot-row ${selectedId === hotspot.id ? "active" : ""}`}
+                key={hotspot.id}
+                onClick={() => (canEdit ? setSelectedId(hotspot.id) : setActiveContentId(hotspot.id))}
+              >
                 <span>#{index + 1} {hotspot.title || "Untitled hotspot"}</span>
                 <i style={{ backgroundColor: hotspot.markerColor || defaultColor }} />
               </button>
@@ -769,7 +842,11 @@ function Editor() {
         <aside className="inspector">
           <h3>Inspector</h3>
           <p>Hotspot content is added and configured here.</p>
-          <Inspector hotspot={selected} onChange={updateHotspot} onDelete={removeHotspot} />
+          {canEdit ? (
+            <Inspector hotspot={selected} onChange={updateHotspot} onDelete={removeHotspot} />
+          ) : (
+            <div className="empty-panel">Log in with the owner account to edit hotspot content.</div>
+          )}
         </aside>
       </div>
       {!editingEnabled && activeContent && <HotspotModal hotspot={activeContent} onClose={() => setActiveContentId(null)} />}
@@ -853,11 +930,12 @@ function NotFound() {
 }
 
 function App() {
+  const auth = useAuth();
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/editor" element={<Editor />} />
+        <Route path="/" element={<Home user={auth.user} authLoading={auth.loading} />} />
+        <Route path="/editor" element={<Editor user={auth.user} authLoading={auth.loading} />} />
         <Route path="/view/:id" element={<ViewProject />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

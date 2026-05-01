@@ -82,3 +82,22 @@ R2_PUBLIC_BASE_URL
 ```
 
 Never put `R2_SECRET_ACCESS_KEY` in frontend code. The browser uploads through `/api/upload`, and that server function sends the file to R2.
+
+## Login-based project ownership
+
+The app now uses Supabase Auth for email/password login.
+
+Project rows use:
+
+```text
+owner_id
+```
+
+Rules:
+
+- Logged-out visitors can open shared `/view/:id` links.
+- Logged-in users can create projects owned by their own Supabase user ID.
+- Logged-in users can update only projects where `owner_id` matches their user ID.
+- Existing recovered projects were assigned to the owner user created in Supabase Auth.
+
+The SQL used for this is in `supabase/auth-owner-rls.sql`.

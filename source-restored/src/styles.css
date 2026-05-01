@@ -58,7 +58,8 @@ a {
 .row,
 .toolbar,
 .button,
-.eyebrow {
+.eyebrow,
+.auth-status {
   align-items: center;
   display: inline-flex;
   gap: 8px;
@@ -230,6 +231,29 @@ a {
 .toolbar {
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.auth-panel {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auth-panel input {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  min-height: 36px;
+  padding: 8px 10px;
+  width: 170px;
+}
+
+.auth-status {
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 6px 4px 10px;
 }
 
 .segmented {
