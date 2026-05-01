@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   CircleDot,
+  Copy,
   Eye,
   FileImage,
   Globe2,
@@ -109,6 +110,29 @@ async function saveProject(project, userId) {
     owner_id: userId,
   });
   if (error) throw new Error(error.message);
+}
+
+async function deleteProjects(ids, userId) {
+  if (!userId) throw new Error("Please log in before deleting.");
+  if (!ids.length) return;
+  const { error } = await supabase.from("projects").delete().eq("owner_id", userId).in("id", ids);
+  if (error) throw new Error(error.message);
+}
+
+async function duplicateProjects(projects, userId) {
+  if (!userId) throw new Error("Please log in before copying.");
+  if (!projects.length) return [];
+  const rows = projects.map((project) => ({
+    id: crypto.randomUUID(),
+    name: `${project.name || "Untitled Project"} 복사본`,
+    image_url: project.imageUrl,
+    hotspots: normalizeHotspots(project.hotspots).map((hotspot) => ({ ...hotspot, id: crypto.randomUUID() })),
+    background_type: project.backgroundType,
+    owner_id: userId,
+  }));
+  const { data, error } = await supabase.from("projects").insert(rows).select("*");
+  if (error) throw new Error(error.message);
+  return (data || []).map(projectFromRow);
 }
 
 async function uploadFile(file) {
@@ -341,13 +365,20 @@ function Home({ user, authLoading }) {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [manageMode, setManageMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [manageBusy, setManageBusy] = useState(false);
+  const [manageMessage, setManageMessage] = useState("");
 
   const refresh = useCallback(() => {
     if (!user) {
       setProjects([]);
       setLoading(false);
+      setManageMode(false);
+      setSelectedIds([]);
       return;
     }
+    setLoading(true);
     listProjects(user.id).then((items) => {
       setProjects(items);
       setLoading(false);
@@ -355,6 +386,62 @@ function Home({ user, authLoading }) {
   }, [user]);
 
   useEffect(refresh, [refresh]);
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => projects.some((project) => project.id === id)));
+  }, [projects]);
+
+  const selectedProjects = useMemo(
+    () => projects.filter((project) => selectedIds.includes(project.id)),
+    [projects, selectedIds],
+  );
+
+  function toggleManageMode() {
+    setManageMessage("");
+    setManageMode((current) => {
+      if (current) setSelectedIds([]);
+      return !current;
+    });
+  }
+
+  function toggleSelected(id) {
+    setManageMessage("");
+    setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  }
+
+  async function handleDuplicateSelected() {
+    if (!user || !selectedProjects.length) return;
+    setManageBusy(true);
+    setManageMessage("");
+    try {
+      await duplicateProjects(selectedProjects, user.id);
+      setManageMessage(`${selectedProjects.length}개 콘텐츠를 복사했습니다.`);
+      setSelectedIds([]);
+      refresh();
+    } catch (error) {
+      setManageMessage(error instanceof Error ? error.message : "복사에 실패했습니다.");
+    } finally {
+      setManageBusy(false);
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (!user || !selectedProjects.length) return;
+    const ok = window.confirm(`${selectedProjects.length}개 콘텐츠를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`);
+    if (!ok) return;
+    setManageBusy(true);
+    setManageMessage("");
+    try {
+      await deleteProjects(selectedIds, user.id);
+      setManageMessage(`${selectedProjects.length}개 콘텐츠를 삭제했습니다.`);
+      setSelectedIds([]);
+      refresh();
+    } catch (error) {
+      setManageMessage(error instanceof Error ? error.message : "삭제에 실패했습니다.");
+    } finally {
+      setManageBusy(false);
+    }
+  }
 
   return (
     <main className="page">
@@ -403,7 +490,28 @@ function Home({ user, authLoading }) {
         ))}
       </section>
       <section className="projects">
-        <h2>내 학습 콘텐츠</h2>
+        <div className="projects-heading">
+          <div>
+            <h2>내 학습 콘텐츠</h2>
+            {user && manageMessage && <p className="manage-message">{manageMessage}</p>}
+          </div>
+          {user && projects.length > 0 && (
+            <Button variant={manageMode ? "secondary" : "ghost"} onClick={toggleManageMode} disabled={manageBusy}>
+              {manageMode ? "관리 끝" : "관리"}
+            </Button>
+          )}
+        </div>
+        {user && manageMode && projects.length > 0 && (
+          <div className="manage-toolbar">
+            <span>{selectedIds.length}개 선택됨</span>
+            <Button variant="secondary" onClick={handleDuplicateSelected} disabled={manageBusy || selectedIds.length === 0}>
+              <Copy size={16} /> 복사
+            </Button>
+            <Button variant="danger" onClick={handleDeleteSelected} disabled={manageBusy || selectedIds.length === 0}>
+              <Trash2 size={16} /> 삭제
+            </Button>
+          </div>
+        )}
         {!user ? (
           <p className="muted">로그인하면 내 프로젝트가 여기에 표시됩니다. 공유받은 보기 링크는 로그인 없이도 열립니다.</p>
         ) : loading ? (
@@ -411,19 +519,31 @@ function Home({ user, authLoading }) {
         ) : projects.length ? (
           <div className="project-grid">
             {projects.map((project) => (
-              <article className="project-card" key={project.id}>
+              <article className={`project-card ${manageMode ? "managing" : ""}`} key={project.id}>
+                {manageMode && (
+                  <label className="project-check">
+                    <input
+                      checked={selectedIds.includes(project.id)}
+                      onChange={() => toggleSelected(project.id)}
+                      type="checkbox"
+                    />
+                    <span>선택</span>
+                  </label>
+                )}
                 <img src={project.imageUrl || "/placeholder.svg"} alt="" />
                 <div>
                   <h3>{project.name}</h3>
                   <p>{project.hotspots.length}개 핫스팟 · {project.backgroundType}</p>
-                  <div className="row">
-                    <Button variant="secondary" onClick={() => navigate(`/editor?id=${project.id}`)}>
-                      수정
-                    </Button>
-                    <Button variant="ghost" onClick={() => navigate(`/view/${project.id}`)}>
-                      보기
-                    </Button>
-                  </div>
+                  {!manageMode && (
+                    <div className="row">
+                      <Button variant="secondary" onClick={() => navigate(`/editor?id=${project.id}`)}>
+                        수정
+                      </Button>
+                      <Button variant="ghost" onClick={() => navigate(`/view/${project.id}`)}>
+                        보기
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </article>
             ))}

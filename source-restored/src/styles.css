@@ -78,7 +78,10 @@ a {
 .auth-status,
 .auth-links,
 .hero-actions,
-.auth-switch {
+.auth-switch,
+.projects-heading,
+.manage-toolbar,
+.project-check {
   align-items: center;
   display: inline-flex;
   gap: 8px;
@@ -220,6 +223,43 @@ a {
   padding: 44px 24px;
 }
 
+.projects-heading {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  width: 100%;
+}
+
+.projects-heading h2 {
+  margin: 0;
+}
+
+.manage-message {
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 700;
+  margin: 6px 0 0;
+}
+
+.manage-toolbar {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-bottom: 18px;
+  padding: 10px;
+  width: 100%;
+}
+
+.manage-toolbar span {
+  color: var(--muted);
+  font-weight: 700;
+  margin-right: auto;
+}
+
 .project-grid {
   display: grid;
   gap: 18px;
@@ -232,6 +272,7 @@ a {
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  position: relative;
   transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
@@ -239,6 +280,36 @@ a {
   border-color: var(--accent);
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
+}
+
+.project-card.managing {
+  border-color: var(--accent-soft);
+}
+
+.project-card.managing:hover {
+  transform: none;
+}
+
+.project-check {
+  background: rgb(255 255 255 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  left: 10px;
+  padding: 7px 10px;
+  position: absolute;
+  top: 10px;
+  z-index: 2;
+}
+
+.project-check input {
+  accent-color: var(--accent);
+  height: 18px;
+  width: 18px;
+}
+
+.project-check span {
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .project-card img {
