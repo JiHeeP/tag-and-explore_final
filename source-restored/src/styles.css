@@ -75,7 +75,10 @@ a {
 .toolbar,
 .button,
 .eyebrow,
-.auth-status {
+.auth-status,
+.auth-links,
+.hero-actions,
+.auth-switch {
   align-items: center;
   display: inline-flex;
   gap: 8px;
@@ -136,6 +139,12 @@ a {
   margin-top: 8px;
   min-height: 48px;
   padding: 12px 22px;
+}
+
+.hero-actions {
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 6px;
 }
 
 .hero {
@@ -274,27 +283,107 @@ a {
   justify-content: flex-end;
 }
 
-.auth-panel {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.auth-panel input {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  min-height: 36px;
-  padding: 8px 10px;
-  width: 170px;
-}
-
 .auth-status {
   background: var(--soft);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 4px 6px 4px 10px;
+}
+
+.auth-links {
+  justify-content: flex-end;
+}
+
+.auth-page {
+  align-items: center;
+  background:
+    radial-gradient(circle at 50% 8%, var(--accent-tint), transparent 34%),
+    var(--background);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px 20px;
+}
+
+.auth-brand {
+  margin-bottom: 24px;
+}
+
+.auth-card {
+  background: rgb(255 255 255 / 0.9);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+  max-width: 440px;
+  padding: 30px;
+  width: min(440px, 100%);
+}
+
+.auth-card h1 {
+  font-size: 34px;
+  line-height: 1.1;
+  margin: 18px 0 10px;
+}
+
+.auth-card p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.auth-form label {
+  color: var(--foreground);
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+  letter-spacing: 0.02em;
+}
+
+.auth-form input {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-height: 44px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.auth-form input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 0;
+}
+
+.auth-message {
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius);
+  color: var(--accent-strong);
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.auth-submit {
+  justify-content: center;
+  min-height: 46px;
+}
+
+.auth-switch {
+  color: var(--muted);
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.auth-switch a {
+  color: var(--accent);
+  font-weight: 800;
 }
 
 .segmented {

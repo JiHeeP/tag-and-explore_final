@@ -179,32 +179,7 @@ function useAuth() {
 }
 
 function AuthPanel({ user, loading }) {
-  const [mode, setMode] = useState("login");
-  const [credential, setCredential] = useState("");
-  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-
-  async function submit(event) {
-    event.preventDefault();
-    if (!credential.trim() || !password) return;
-    setBusy(true);
-    try {
-      const email = credentialToEmail(credential);
-      const result =
-        mode === "login"
-          ? await supabase.auth.signInWithPassword({ email, password })
-          : await supabase.auth.signUp({ email, password });
-      if (result.error) throw new Error(result.error.message);
-      if (mode === "signup" && !result.data.session) {
-        alert("Account created. Check your email if Supabase asks for confirmation, then log in.");
-      }
-      setPassword("");
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Authentication failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function signOut() {
     setBusy(true);
@@ -226,19 +201,103 @@ function AuthPanel({ user, loading }) {
   }
 
   return (
-    <form className="auth-panel" onSubmit={submit}>
-      <div className="segmented compact">
-        <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
-          로그인
-        </button>
-        <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>
-          가입
-        </button>
-      </div>
-      <input value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="이메일" />
-      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="비밀번호" />
-      <Button type="submit" disabled={busy}>{busy ? "처리 중..." : mode === "login" ? "로그인" : "가입"}</Button>
-    </form>
+    <nav className="auth-links" aria-label="인증">
+      <Link className="button secondary" to="/login">로그인</Link>
+      <Link className="button primary" to="/signup">가입</Link>
+    </nav>
+  );
+}
+
+function AuthPage({ mode, user, authLoading }) {
+  const navigate = useNavigate();
+  const isSignup = mode === "signup";
+  const [credential, setCredential] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!authLoading && user) navigate("/", { replace: true });
+  }, [authLoading, navigate, user]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setMessage("");
+    const email = credentialToEmail(credential);
+    if (!email) {
+      setMessage("이메일을 입력해 주세요.");
+      return;
+    }
+    if (password.length < 6) {
+      setMessage("비밀번호는 6자 이상이어야 합니다.");
+      return;
+    }
+    if (isSignup && password !== passwordConfirm) {
+      setMessage("비밀번호가 서로 다릅니다.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = isSignup
+        ? await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signInWithPassword({ email, password });
+      if (result.error) throw new Error(result.error.message);
+      if (isSignup && !result.data.session) {
+        setMessage("가입이 완료되었습니다. 이제 로그인해 주세요.");
+        setPassword("");
+        setPasswordConfirm("");
+        navigate("/login", { replace: true });
+        return;
+      }
+      navigate("/", { replace: true });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "인증에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (authLoading) return <main className="centered muted">로그인 상태를 확인하는 중...</main>;
+
+  return (
+    <main className="auth-page">
+      <Link to="/" className="brand auth-brand">
+        <Sparkles size={22} />
+        <span>Tag and Explore</span>
+      </Link>
+      <section className="auth-card">
+        <div className="eyebrow">
+          <Sparkles size={15} /> {isSignup ? "Create Account" : "Welcome Back"}
+        </div>
+        <h1>{isSignup ? "가입하기" : "로그인"}</h1>
+        <p>{isSignup ? "내 학습 콘텐츠를 만들고 저장할 계정을 만듭니다." : "내 프로젝트를 이어서 만들고 수정합니다."}</p>
+        <form className="auth-form" onSubmit={submit}>
+          <label>
+            이메일
+            <input type="email" autoComplete="email" value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="name@example.com" />
+          </label>
+          <label>
+            비밀번호
+            <input type="password" autoComplete={isSignup ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="6자 이상" />
+          </label>
+          {isSignup && (
+            <label>
+              비밀번호 확인
+              <input type="password" autoComplete="new-password" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} placeholder="한 번 더 입력" />
+            </label>
+          )}
+          {message && <p className="auth-message">{message}</p>}
+          <Button className="auth-submit" type="submit" disabled={busy}>
+            {busy ? "처리 중..." : isSignup ? "가입하기" : "로그인"}
+          </Button>
+        </form>
+        <div className="auth-switch">
+          {isSignup ? "이미 계정이 있나요?" : "아직 계정이 없나요?"}
+          <Link to={isSignup ? "/login" : "/signup"}>{isSignup ? "로그인" : "가입하기"}</Link>
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -296,7 +355,14 @@ function Home({ user, authLoading }) {
             <Plus size={20} /> 새 학습 콘텐츠 만들기
           </Button>
         ) : (
-          <p className="muted">로그인하면 내 프로젝트를 만들고 수정할 수 있습니다.</p>
+          <div className="hero-actions">
+            <Button className="large" onClick={() => navigate("/login")}>
+              로그인하고 시작하기
+            </Button>
+            <Button className="large" variant="secondary" onClick={() => navigate("/signup")}>
+              계정 만들기
+            </Button>
+          </div>
         )}
       </section>
       <section className="steps">
@@ -994,6 +1060,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home user={auth.user} authLoading={auth.loading} />} />
+        <Route path="/login" element={<AuthPage mode="login" user={auth.user} authLoading={auth.loading} />} />
+        <Route path="/signup" element={<AuthPage mode="signup" user={auth.user} authLoading={auth.loading} />} />
         <Route path="/editor" element={<Editor user={auth.user} authLoading={auth.loading} />} />
         <Route path="/view/:id" element={<ViewProject />} />
         <Route path="*" element={<NotFound />} />
