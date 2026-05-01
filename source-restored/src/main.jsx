@@ -369,6 +369,7 @@ function Home({ user, authLoading }) {
   const [selectedIds, setSelectedIds] = useState([]);
   const [manageBusy, setManageBusy] = useState(false);
   const [manageMessage, setManageMessage] = useState("");
+  const [deletePending, setDeletePending] = useState(false);
 
   const refresh = useCallback(() => {
     if (!user) {
@@ -398,6 +399,7 @@ function Home({ user, authLoading }) {
 
   function toggleManageMode() {
     setManageMessage("");
+    setDeletePending(false);
     setManageMode((current) => {
       if (current) setSelectedIds([]);
       return !current;
@@ -406,6 +408,7 @@ function Home({ user, authLoading }) {
 
   function toggleSelected(id) {
     setManageMessage("");
+    setDeletePending(false);
     setSelectedIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
@@ -416,6 +419,7 @@ function Home({ user, authLoading }) {
     try {
       await duplicateProjects(selectedProjects, user.id);
       setManageMessage(`${selectedProjects.length}개 콘텐츠를 복사했습니다.`);
+      setDeletePending(false);
       setSelectedIds([]);
       refresh();
     } catch (error) {
@@ -427,13 +431,17 @@ function Home({ user, authLoading }) {
 
   async function handleDeleteSelected() {
     if (!user || !selectedProjects.length) return;
-    const ok = window.confirm(`${selectedProjects.length}개 콘텐츠를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`);
-    if (!ok) return;
+    if (!deletePending) {
+      setDeletePending(true);
+      setManageMessage("삭제할 콘텐츠를 확인한 뒤, 정말 삭제를 한 번 더 눌러 주세요.");
+      return;
+    }
     setManageBusy(true);
     setManageMessage("");
     try {
       await deleteProjects(selectedIds, user.id);
       setManageMessage(`${selectedProjects.length}개 콘텐츠를 삭제했습니다.`);
+      setDeletePending(false);
       setSelectedIds([]);
       refresh();
     } catch (error) {
@@ -508,8 +516,13 @@ function Home({ user, authLoading }) {
               <Copy size={16} /> 복사
             </Button>
             <Button variant="danger" onClick={handleDeleteSelected} disabled={manageBusy || selectedIds.length === 0}>
-              <Trash2 size={16} /> 삭제
+              <Trash2 size={16} /> {deletePending ? "정말 삭제" : "삭제"}
             </Button>
+            {deletePending && (
+              <Button variant="ghost" onClick={() => setDeletePending(false)} disabled={manageBusy}>
+                취소
+              </Button>
+            )}
           </div>
         )}
         {!user ? (
