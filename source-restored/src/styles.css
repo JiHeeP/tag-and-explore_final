@@ -1,15 +1,26 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap");
 
 :root {
   color-scheme: light;
-  --background: #f6f7fa;
-  --foreground: #111827;
+  --background: oklch(0.985 0.003 280);
+  --foreground: oklch(0.19 0.035 280);
   --card: #ffffff;
-  --muted: #6b7280;
-  --line: #e2e8f0;
-  --soft: #eef2f7;
-  --accent: #7c3aed;
-  --danger: #dc2626;
+  --muted: oklch(0.46 0.025 280);
+  --weak: oklch(0.62 0.018 280);
+  --line: oklch(0.88 0.01 280);
+  --soft: oklch(0.965 0.005 280);
+  --soft-2: oklch(0.94 0.008 280);
+  --accent: oklch(0.5 0.2 295);
+  --accent-strong: oklch(0.42 0.2 295);
+  --accent-soft: oklch(0.91 0.055 295);
+  --accent-tint: oklch(0.965 0.022 295);
+  --danger: oklch(0.55 0.2 25);
+  --radius: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --shadow-sm: 0 1px 0 rgb(17 24 39 / 0.04);
+  --shadow-md: 0 10px 30px rgb(17 24 39 / 0.08);
+  --shadow-pop: 0 18px 44px rgb(124 58 237 / 0.18);
 }
 
 * {
@@ -20,7 +31,8 @@ body {
   margin: 0;
   background: var(--background);
   color: var(--foreground);
-  font-family: "DM Sans", system-ui, sans-serif;
+  font-family: "DM Sans", "Noto Sans KR", system-ui, sans-serif;
+  word-break: keep-all;
 }
 
 button,
@@ -46,12 +58,16 @@ a {
 .app-header,
 .editor-header {
   align-items: center;
-  background: var(--card);
+  background: rgb(255 255 255 / 0.86);
   border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(14px);
   display: flex;
   gap: 16px;
   justify-content: space-between;
   padding: 12px 24px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .brand,
@@ -68,7 +84,8 @@ a {
 .brand {
   color: var(--foreground);
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0;
 }
 
 .brand svg,
@@ -79,15 +96,18 @@ a {
 
 .button {
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-weight: 700;
   min-height: 36px;
   padding: 8px 13px;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  white-space: nowrap;
 }
 
 .button.primary {
   background: var(--accent);
   color: white;
+  box-shadow: var(--shadow-pop);
 }
 
 .button.secondary {
@@ -100,6 +120,10 @@ a {
   background: transparent;
   border-color: transparent;
   color: var(--foreground);
+}
+
+.button:hover {
+  transform: translateY(-1px);
 }
 
 .button.danger {
@@ -116,13 +140,13 @@ a {
 
 .hero {
   margin: 0 auto;
-  max-width: 760px;
-  padding: 78px 24px 70px;
+  max-width: 980px;
+  padding: 72px 24px 66px;
   text-align: center;
 }
 
 .eyebrow {
-  background: #ede9fe;
+  background: var(--accent-tint);
   border-radius: 999px;
   color: var(--accent);
   font-size: 14px;
@@ -131,9 +155,10 @@ a {
 }
 
 .hero h1 {
-  font-size: clamp(40px, 7vw, 58px);
-  line-height: 1;
+  font-size: clamp(38px, 5.2vw, 60px);
+  line-height: 1.04;
   margin: 22px 0 18px;
+  text-wrap: balance;
 }
 
 .hero h1 span {
@@ -147,7 +172,7 @@ a {
 }
 
 .steps {
-  background: var(--card);
+  background: rgb(255 255 255 / 0.72);
   border-block: 1px solid var(--line);
   display: grid;
   gap: 24px;
@@ -161,7 +186,7 @@ a {
 
 .steps b {
   align-items: center;
-  background: #ede9fe;
+  background: var(--accent-tint);
   border-radius: 999px;
   color: var(--accent);
   display: inline-flex;
@@ -195,8 +220,16 @@ a {
 .project-card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.project-card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
 }
 
 .project-card img {
@@ -216,10 +249,18 @@ a {
 .inspector textarea {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius);
   min-height: 38px;
   padding: 8px 10px;
   width: 100%;
+}
+
+.title-input:focus,
+.inspector input:focus,
+.inspector textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 0;
 }
 
 .title-input {
@@ -252,13 +293,14 @@ a {
 .auth-status {
   background: var(--soft);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 4px 6px 4px 10px;
 }
 
 .segmented {
   background: var(--soft);
-  border-radius: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
   display: flex;
   gap: 2px;
   padding: 3px;
@@ -273,29 +315,30 @@ a {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   display: inline-flex;
   gap: 6px;
   justify-content: center;
   min-height: 34px;
   padding: 7px 10px;
+  white-space: nowrap;
 }
 
 .segmented button.active,
 .choice-grid button.active {
-  background: var(--accent);
+  background: var(--foreground);
   color: white;
 }
 
 .editor-grid {
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr) 410px;
+  grid-template-columns: 280px minmax(0, 1fr) 360px;
   height: calc(100vh - 61px);
 }
 
 .sidebar,
 .inspector {
-  background: var(--card);
+  background: rgb(255 255 255 / 0.78);
   overflow: auto;
   padding: 18px;
 }
@@ -310,6 +353,8 @@ a {
 
 .canvas-area {
   align-items: center;
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 18px 18px;
   display: flex;
   justify-content: center;
   overflow: auto;
@@ -319,8 +364,9 @@ a {
 .stage {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  max-width: 1000px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  max-width: 1100px;
   position: relative;
   width: 100%;
 }
@@ -341,7 +387,7 @@ a {
 }
 
 .image-stage img {
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   display: block;
   max-height: min(72vh, 720px);
   object-fit: contain;
@@ -363,29 +409,50 @@ a {
   background: var(--marker);
   border: 3px solid white;
   border-radius: 999px;
-  box-shadow: 0 10px 30px rgb(17 24 39 / 0.24);
+  box-shadow: 0 10px 30px rgb(17 24 39 / 0.22);
   color: white;
   display: flex;
   font-size: 14px;
   font-weight: 800;
-  height: 42px;
+  height: 36px;
   justify-content: center;
   touch-action: none;
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 42px;
+  width: 36px;
   z-index: 3;
 }
 
+.marker::after {
+  animation: markerPulse 1.8s ease-out infinite;
+  border: 2px solid var(--marker);
+  border-radius: inherit;
+  content: "";
+  inset: -7px;
+  opacity: 0.38;
+  position: absolute;
+}
+
 .marker.selected {
-  outline: 4px solid rgb(124 58 237 / 0.28);
+  outline: 4px solid var(--accent-soft);
+}
+
+@keyframes markerPulse {
+  0% {
+    opacity: 0.42;
+    transform: scale(0.78);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.45);
+  }
 }
 
 .hotspot-row {
   align-items: center;
   background: var(--background);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: flex;
   justify-content: space-between;
   margin-top: 8px;
@@ -395,7 +462,7 @@ a {
 }
 
 .hotspot-row.active {
-  background: #ede9fe;
+  background: var(--accent-tint);
   border-color: var(--accent);
 }
 
@@ -409,7 +476,7 @@ a {
 .empty-panel {
   background: var(--background);
   border: 1px dashed var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--muted);
   margin-top: 12px;
   padding: 24px;
@@ -430,8 +497,10 @@ a {
 
 .inspector label {
   color: var(--foreground);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .inspector textarea {
@@ -457,7 +526,7 @@ a {
 
 .swatches button {
   border: 3px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   height: 34px;
 }
 
@@ -473,7 +542,7 @@ a {
 .gallery-row {
   align-items: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   display: grid;
   gap: 8px;
   grid-template-columns: 64px 1fr auto auto;
@@ -491,7 +560,7 @@ a {
   align-items: center;
   background: var(--card);
   border: 2px dashed var(--line);
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   color: var(--foreground);
   display: flex;
   flex-direction: column;
@@ -513,11 +582,11 @@ a {
 }
 
 .modal-backdrop {
-  align-items: center;
+  align-items: flex-start;
   background: rgb(15 23 42 / 0.56);
   display: flex;
   inset: 0;
-  justify-content: center;
+  justify-content: flex-end;
   padding: 24px;
   position: fixed;
   z-index: 20;
@@ -525,13 +594,15 @@ a {
 
 .modal {
   background: var(--card);
-  border-radius: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   max-height: 90vh;
-  max-width: 760px;
+  max-width: 360px;
   overflow: auto;
   padding: 24px;
   position: relative;
-  width: min(760px, 100%);
+  width: min(360px, 100%);
 }
 
 .modal .close {
@@ -565,6 +636,8 @@ a {
 }
 
 .view-canvas {
+  background-image: radial-gradient(var(--line) 1px, transparent 1px);
+  background-size: 18px 18px;
   padding: 24px;
 }
 

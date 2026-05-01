@@ -212,14 +212,14 @@ function AuthPanel({ user, loading }) {
     setBusy(false);
   }
 
-  if (loading) return <p className="muted">Checking login...</p>;
+  if (loading) return <p className="muted">로그인 확인 중...</p>;
   if (user) {
     return (
       <div className="auth-status">
         <User size={16} />
         <span>{user.email || "Logged in"}</span>
-        <Button variant="secondary" onClick={signOut} disabled={busy}>
-          <LogOut size={16} /> Log out
+        <Button variant="secondary" type="button" onClick={signOut} disabled={busy}>
+          <LogOut size={16} /> 로그아웃
         </Button>
       </div>
     );
@@ -229,15 +229,15 @@ function AuthPanel({ user, loading }) {
     <form className="auth-panel" onSubmit={submit}>
       <div className="segmented compact">
         <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
-          Log in
+          로그인
         </button>
         <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => setMode("signup")}>
-          Sign up
+          가입
         </button>
       </div>
-      <input value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="Email" />
-      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" />
-      <Button disabled={busy}>{busy ? "Please wait..." : mode === "login" ? "Log in" : "Sign up"}</Button>
+      <input value={credential} onChange={(event) => setCredential(event.target.value)} placeholder="이메일" />
+      <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="비밀번호" />
+      <Button type="submit" disabled={busy}>{busy ? "처리 중..." : mode === "login" ? "로그인" : "가입"}</Button>
     </form>
   );
 }
@@ -279,31 +279,31 @@ function Home({ user, authLoading }) {
         <AuthPanel user={user} loading={authLoading} />
         {user && (
           <Button onClick={() => navigate("/editor")}>
-            <Plus size={17} /> New Project
+            <Plus size={17} /> 새 프로젝트
           </Button>
         )}
       </AppHeader>
       <section className="hero">
         <div className="eyebrow">
-          <Sparkles size={16} /> Interactive Experience Builder
+          <Sparkles size={16} /> Teacher Interactive Builder
         </div>
         <h1>
-          Make any image <span>interactive</span>
+          한 장의 이미지를 <span>interactive</span> 학습 공간으로
         </h1>
-        <p>Upload images, 360 panoramas, or 3D models. Add clickable hotspots with text, links, embeds, and galleries.</p>
+        <p>교사가 이미지, 360° 파노라마, 3D 모델 위에 핫스팟을 찍고 학생이 누른 만큼 깊어지는 자료를 만듭니다.</p>
         {user ? (
           <Button className="large" onClick={() => navigate("/editor")}>
-            <Plus size={20} /> Create Now
+            <Plus size={20} /> 새 학습 콘텐츠 만들기
           </Button>
         ) : (
-          <p className="muted">Log in or sign up first to create and edit your own projects.</p>
+          <p className="muted">로그인하면 내 프로젝트를 만들고 수정할 수 있습니다.</p>
         )}
       </section>
       <section className="steps">
         {[
-          ["1", "Upload", "Drop an image, panorama, or .glb 3D model."],
-          ["2", "Tag", "Place hotspots and attach rich content."],
-          ["3", "Share", "Share a read-only view link and keep edit access private."],
+          ["1", "자료 올리기", "이미지, 360° 사진, 3D 모델을 업로드합니다."],
+          ["2", "핫스팟 찍기", "학생이 눌러볼 지점에 설명과 자료를 붙입니다."],
+          ["3", "공유하기", "학생에게는 보기 전용 링크를 전달합니다."],
         ].map(([step, title, text]) => (
           <article key={step}>
             <b>{step}</b>
@@ -313,11 +313,11 @@ function Home({ user, authLoading }) {
         ))}
       </section>
       <section className="projects">
-        <h2>Projects</h2>
+        <h2>내 학습 콘텐츠</h2>
         {!user ? (
-          <p className="muted">Log in to see your projects. Shared view links still open without logging in.</p>
+          <p className="muted">로그인하면 내 프로젝트가 여기에 표시됩니다. 공유받은 보기 링크는 로그인 없이도 열립니다.</p>
         ) : loading ? (
-          <p className="muted">Loading projects...</p>
+          <p className="muted">프로젝트를 불러오는 중...</p>
         ) : projects.length ? (
           <div className="project-grid">
             {projects.map((project) => (
@@ -325,13 +325,13 @@ function Home({ user, authLoading }) {
                 <img src={project.imageUrl || "/placeholder.svg"} alt="" />
                 <div>
                   <h3>{project.name}</h3>
-                  <p>{project.hotspots.length} hotspots · {project.backgroundType}</p>
+                  <p>{project.hotspots.length}개 핫스팟 · {project.backgroundType}</p>
                   <div className="row">
                     <Button variant="secondary" onClick={() => navigate(`/editor?id=${project.id}`)}>
-                      Edit
+                      수정
                     </Button>
                     <Button variant="ghost" onClick={() => navigate(`/view/${project.id}`)}>
-                      View
+                      보기
                     </Button>
                   </div>
                 </div>
@@ -339,7 +339,7 @@ function Home({ user, authLoading }) {
             ))}
           </div>
         ) : (
-          <p className="muted">No projects yet.</p>
+          <p className="muted">아직 프로젝트가 없습니다.</p>
         )}
       </section>
     </main>
@@ -404,7 +404,7 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
 
   return (
     <div className="stage image-stage" ref={ref} onClick={handleClick}>
-      {editing && <div className="stage-hint">Click the image to add a hotspot.</div>}
+      {editing && <div className="stage-hint">이미지를 클릭해 핫스팟 추가</div>}
       <img ref={imageRef} src={imageUrl} alt="" draggable={false} />
       {hotspots.map((hotspot) => (
         <HotspotMarker
@@ -430,7 +430,7 @@ function PanoramaStage(props) {
   return (
     <div>
       <ImageStage {...props} />
-      <p className="hint">360 preview restored as an interactive flat panorama. The original bundle used a spherical viewer.</p>
+      <p className="hint">현재 360° 자료는 평면 미리보기로 표시됩니다.</p>
     </div>
   );
 }
@@ -485,7 +485,7 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
           style={{ left: `${hotspot.x}%`, top: `${hotspot.y}%` }}
         />
       ))}
-      <p className="hint">Double-click to add a 3D hotspot. Exact world-position recovery needs the original source map.</p>
+      <p className="hint">3D 자료는 더블클릭으로 핫스팟을 추가합니다.</p>
     </div>
   );
 }
@@ -498,11 +498,11 @@ function HotspotModal({ hotspot, onClose }) {
         <Button variant="ghost" className="close" onClick={onClose}>
           <X size={18} />
         </Button>
-        <h2>{hotspot.title || "Untitled hotspot"}</h2>
+        <h2>{hotspot.title || "제목 없는 핫스팟"}</h2>
         {hotspot.description && <p>{hotspot.description}</p>}
         {hotspot.link && (
           <a className="external" href={hotspot.link} target="_blank" rel="noreferrer">
-            Open link
+            링크 열기
           </a>
         )}
         {hotspot.contentType === "video" && hotspot.mediaUrl && <video controls src={hotspot.mediaUrl} />}
@@ -524,7 +524,7 @@ function HotspotModal({ hotspot, onClose }) {
 
 function Inspector({ hotspot, onChange, onDelete }) {
   const fileRef = useRef(null);
-  if (!hotspot) return <div className="empty-panel">Select a hotspot from the list or click the canvas to create one.</div>;
+  if (!hotspot) return <div className="empty-panel">이미지를 클릭해 핫스팟을 만들거나 왼쪽 목록에서 선택하세요.</div>;
 
   async function addGalleryImages(files) {
     const urls = await Promise.all(Array.from(files).map(uploadFile));
@@ -556,14 +556,14 @@ function Inspector({ hotspot, onChange, onDelete }) {
     <div className="inspector-form">
       <div className="panel-heading">
         <div>
-          <h3>Selected hotspot</h3>
-          <p>Configure marker style and hotspot content.</p>
+          <h3>선택한 핫스팟</h3>
+          <p>마커 모양과 학생에게 보여줄 내용을 편집합니다.</p>
         </div>
         <Button variant="danger" onClick={() => onDelete(hotspot.id)}>
           <Trash2 size={16} />
         </Button>
       </div>
-      <label>Marker Icon</label>
+      <label>마커 아이콘</label>
       <div className="choice-grid">
         {icons.map(({ value, label, icon: Icon }) => (
           <button className={hotspot.icon === value ? "active" : ""} title={label} key={value} onClick={() => onChange({ ...hotspot, icon: value })}>
@@ -571,7 +571,7 @@ function Inspector({ hotspot, onChange, onDelete }) {
           </button>
         ))}
       </div>
-      <label>Marker Color</label>
+      <label>마커 색상</label>
       <div className="swatches">
         {markerColors.map((color) => (
           <button
@@ -582,41 +582,46 @@ function Inspector({ hotspot, onChange, onDelete }) {
           />
         ))}
       </div>
-      <label>Marker Mode</label>
+      <label>마커 방식</label>
       <div className="segmented">
         <button className={hotspot.markerMode !== "number" ? "active" : ""} onClick={() => onChange({ ...hotspot, markerMode: "icon" })}>
-          Icon
+          아이콘
         </button>
         <button className={hotspot.markerMode === "number" ? "active" : ""} onClick={() => onChange({ ...hotspot, markerMode: "number" })}>
-          Number
+          번호
         </button>
       </div>
       {hotspot.markerMode === "number" && (
         <input type="number" min="1" max="999" value={hotspot.markerNumber || 1} onChange={(event) => onChange({ ...hotspot, markerNumber: Number(event.target.value) || 1 })} />
       )}
-      <label>Content Type</label>
+      <label>콘텐츠 타입</label>
       <div className="segmented wrap">
-        {["text", "video", "embed", "gallery"].map((type) => (
+        {[
+          ["text", "텍스트"],
+          ["video", "영상"],
+          ["embed", "임베드"],
+          ["gallery", "갤러리"],
+        ].map(([type, label]) => (
           <button className={hotspot.contentType === type ? "active" : ""} key={type} onClick={() => onChange({ ...hotspot, contentType: type })}>
-            {type}
+            {label}
           </button>
         ))}
       </div>
-      <label>Title</label>
-      <input value={hotspot.title} onChange={(event) => onChange({ ...hotspot, title: event.target.value })} placeholder="Enter title..." />
-      <label>Description</label>
-      <textarea value={hotspot.description} onChange={(event) => onChange({ ...hotspot, description: event.target.value })} placeholder="Enter description..." />
-      <label>Link URL</label>
+      <label>제목</label>
+      <input value={hotspot.title} onChange={(event) => onChange({ ...hotspot, title: event.target.value })} placeholder="제목을 입력하세요" />
+      <label>설명</label>
+      <textarea value={hotspot.description} onChange={(event) => onChange({ ...hotspot, description: event.target.value })} placeholder="학생에게 보여줄 설명을 입력하세요" />
+      <label>링크 URL</label>
       <input value={hotspot.link || ""} onChange={(event) => onChange({ ...hotspot, link: event.target.value })} placeholder="https://..." />
       {hotspot.contentType === "video" && (
         <>
-          <label>Video URL</label>
+          <label>영상 URL</label>
           <input value={hotspot.mediaUrl || ""} onChange={(event) => onChange({ ...hotspot, mediaUrl: event.target.value, mediaType: "video" })} placeholder="https://example.com/video.mp4" />
         </>
       )}
       {hotspot.contentType === "embed" && (
         <>
-          <label>Embed Code</label>
+          <label>임베드 코드</label>
           <textarea className="mono" value={hotspot.embedCode || ""} onChange={(event) => onChange({ ...hotspot, embedCode: event.target.value })} placeholder='<iframe src="https://..."></iframe>' />
         </>
       )}
@@ -624,14 +629,14 @@ function Inspector({ hotspot, onChange, onDelete }) {
         <div className="gallery-editor">
           <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(event) => addGalleryImages(event.target.files || [])} />
           <Button variant="secondary" onClick={() => fileRef.current?.click()}>
-            <Upload size={16} /> Upload
+            <Upload size={16} /> 업로드
           </Button>
           {hotspot.mediaItems.map((item, index) => (
             <div className="gallery-row" key={item.id}>
               <img src={item.url} alt="" />
               <div>
-                <span>Image {index + 1}</span>
-                <input value={item.caption || ""} onChange={(event) => updateMediaCaption(item.id, event.target.value)} placeholder="Optional caption" />
+                <span>이미지 {index + 1}</span>
+                <input value={item.caption || ""} onChange={(event) => updateMediaCaption(item.id, event.target.value)} placeholder="캡션" />
               </div>
               <Button variant="ghost" onClick={() => moveMedia(item.id, "up")}><ChevronUp size={15} /></Button>
               <Button variant="ghost" onClick={() => moveMedia(item.id, "down")}><ChevronDown size={15} /></Button>
@@ -756,10 +761,10 @@ function Editor({ user, authLoading }) {
       await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType }, user.id);
       setOwnerId(user.id);
       if (!idParam) navigate(`/editor?id=${projectId}`, { replace: true });
-      alert("Project saved successfully.");
+      alert("프로젝트를 저장했습니다.");
       return true;
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Save failed.");
+      alert(error instanceof Error ? error.message : "저장에 실패했습니다.");
       return false;
     } finally {
       setSaving(false);
@@ -771,7 +776,7 @@ function Editor({ user, authLoading }) {
     const saved = await handleSave();
     if (!saved) return;
     await navigator.clipboard.writeText(`${window.location.origin}/view/${projectId}`);
-    alert("View link copied.");
+    alert("보기 링크를 복사했습니다.");
   }
 
   const stage = useMemo(() => {
@@ -805,7 +810,7 @@ function Editor({ user, authLoading }) {
           <AuthPanel user={user} loading={authLoading} />
           <div className="segmented compact">
             {[
-              ["image", "Image", FileImage],
+              ["image", "이미지", FileImage],
               ["360", "360", Globe2],
               ["glb", "3D", Box],
             ].map(([value, label, Icon]) => (
@@ -827,23 +832,23 @@ function Editor({ user, authLoading }) {
           {imageUrl && canEdit && (
             <div className="segmented compact">
               <button className={editing ? "active" : ""} onClick={() => setEditing(true)}>
-                Edit
+                편집
               </button>
               <button className={!editing ? "active" : ""} onClick={() => setEditing(false)}>
-                <Eye size={15} /> Preview
+                <Eye size={15} /> 미리보기
               </button>
             </div>
           )}
           {imageUrl && canEdit && (
             <>
-              <Button variant="secondary" onClick={handleSave} disabled={saving}><Save size={16} /> {saving ? "Saving..." : "Save"}</Button>
-              <Button variant="secondary" onClick={copyViewLink} disabled={saving}><Share2 size={16} /> Share</Button>
+              <Button variant="secondary" onClick={handleSave} disabled={saving}><Save size={16} /> {saving ? "저장 중..." : "저장"}</Button>
+              <Button variant="secondary" onClick={copyViewLink} disabled={saving}><Share2 size={16} /> 공유</Button>
             </>
           )}
           {canEdit && (
             <>
               <Button variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
-                <Upload size={16} /> {uploading ? "Uploading..." : imageUrl ? "Change" : "Upload"}
+                <Upload size={16} /> {uploading ? "업로드 중..." : imageUrl ? "이미지 교체" : "업로드"}
               </Button>
                 <input
                   hidden
@@ -859,14 +864,14 @@ function Editor({ user, authLoading }) {
           )}
         </div>
       </header>
-      {projectLoading && <div className="readonly">Loading project...</div>}
-      {projectMissing && <div className="readonly">Project not found. The link may be invalid.</div>}
-      {!user && <div className="readonly">Log in to create or edit projects. Shared view links are still read-only.</div>}
-      {user && ownerId && ownerId !== user.id && <div className="readonly">This project belongs to another account, so it is read-only for you.</div>}
+      {projectLoading && <div className="readonly">프로젝트를 불러오는 중입니다.</div>}
+      {projectMissing && <div className="readonly">프로젝트를 찾을 수 없습니다. 링크가 잘못되었을 수 있습니다.</div>}
+      {!user && <div className="readonly">로그인하면 프로젝트를 만들고 수정할 수 있습니다. 공유 보기 링크는 읽기 전용입니다.</div>}
+      {user && ownerId && ownerId !== user.id && <div className="readonly">다른 계정의 프로젝트라 보기만 가능합니다.</div>}
       <div className="editor-grid">
         <aside className="sidebar">
-          <h3>Hotspots</h3>
-          <p>{editingEnabled ? "Select a hotspot to edit it. Click the canvas to place a new one." : "This shared project is view-only."}</p>
+          <h3>핫스팟</h3>
+          <p>{editingEnabled ? "이미지를 클릭해 새 핫스팟을 찍고, 목록에서 선택해 편집하세요." : "이 프로젝트는 보기 전용입니다."}</p>
           {hotspots.length ? (
             hotspots.map((hotspot, index) => (
               <button
@@ -874,12 +879,12 @@ function Editor({ user, authLoading }) {
                 key={hotspot.id}
                 onClick={() => (canEdit ? setSelectedId(hotspot.id) : setActiveContentId(hotspot.id))}
               >
-                <span>#{index + 1} {hotspot.title || "Untitled hotspot"}</span>
+                <span>#{index + 1} {hotspot.title || "제목 없는 핫스팟"}</span>
                 <i style={{ backgroundColor: hotspot.markerColor || defaultColor }} />
               </button>
             ))
           ) : (
-            <div className="empty-panel">No hotspots yet.</div>
+            <div className="empty-panel">아직 핫스팟이 없습니다.</div>
           )}
         </aside>
         <section className="canvas-area">
@@ -888,18 +893,18 @@ function Editor({ user, authLoading }) {
           ) : (
             <button className="upload-empty" disabled={!canEdit} onClick={() => fileRef.current?.click()}>
               <Upload size={34} />
-              <strong>Upload {backgroundType === "glb" ? "a 3D model (.glb)" : backgroundType === "360" ? "a 360 image" : "an image"}</strong>
-              <span>{canEdit ? "Add hotspots to make it interactive." : "This link does not allow editing or uploads."}</span>
+              <strong>{backgroundType === "glb" ? "3D 모델(.glb) 업로드" : backgroundType === "360" ? "360° 이미지 업로드" : "이미지 업로드"}</strong>
+              <span>{canEdit ? "업로드 후 이미지를 클릭해 핫스팟을 추가하세요." : "이 링크에서는 편집하거나 업로드할 수 없습니다."}</span>
             </button>
           )}
         </section>
         <aside className="inspector">
-          <h3>Inspector</h3>
-          <p>Hotspot content is added and configured here.</p>
+          <h3>인스펙터</h3>
+          <p>학생이 눌렀을 때 볼 내용을 이곳에서 편집합니다.</p>
           {canEdit ? (
             <Inspector hotspot={selected} onChange={updateHotspot} onDelete={removeHotspot} />
           ) : (
-            <div className="empty-panel">Log in with the owner account to edit hotspot content.</div>
+            <div className="empty-panel">소유자 계정으로 로그인하면 편집할 수 있습니다.</div>
           )}
         </aside>
       </div>
@@ -929,13 +934,13 @@ function ViewProject() {
   if (notFound) {
     return (
       <main className="centered">
-        <h1>Project not found</h1>
-        <p>This project may have been deleted or the link is invalid.</p>
-        <Button variant="secondary" onClick={() => navigate("/")}>Back to home</Button>
+        <h1>프로젝트를 찾을 수 없습니다</h1>
+        <p>삭제되었거나 링크가 잘못되었을 수 있습니다.</p>
+        <Button variant="secondary" onClick={() => navigate("/")}>홈으로</Button>
       </main>
     );
   }
-  if (!project) return <main className="centered muted">Loading...</main>;
+  if (!project) return <main className="centered muted">불러오는 중...</main>;
 
   const active = project.hotspots.find((hotspot) => hotspot.id === activeId);
   const props = {
@@ -955,7 +960,7 @@ function ViewProject() {
           <strong>{project.name}</strong>
         </div>
         <Button variant="ghost" onClick={() => navigate("/")}>
-          <ArrowLeft size={16} /> Home
+          <ArrowLeft size={16} /> 홈
         </Button>
       </header>
       <section className="view-canvas">
@@ -966,7 +971,7 @@ function ViewProject() {
         ) : (
           <ImageStage imageUrl={project.imageUrl} {...props} />
         )}
-        <p className="hint">This shared view is read-only.</p>
+        <p className="hint">학생용 공유 화면입니다. 이 화면에서는 수정할 수 없습니다.</p>
       </section>
       {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
     </main>
