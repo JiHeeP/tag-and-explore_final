@@ -27,13 +27,7 @@ create policy "Anyone can record project views"
 on public.project_views
 for insert
 to anon, authenticated
-with check (
-  exists (
-    select 1
-    from public.projects
-    where projects.id = project_views.project_id
-  )
-);
+with check (true);
 
 -- Owners can read view rows only for projects they own.
 create policy "Owners can read views for their projects"
