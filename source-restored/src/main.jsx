@@ -5,6 +5,8 @@ import { createClient } from "@supabase/supabase-js";
 import {
   ArrowLeft,
   Box,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
   ChevronUp,
   CircleDot,
@@ -198,18 +200,61 @@ async function uploadFile(file) {
 
 function parseEmbed(code) {
   if (!code?.trim()) return null;
-  const iframe = new DOMParser().parseFromString(code, "text/html").querySelector("iframe");
-  const src = iframe?.getAttribute("src")?.trim();
+  const value = code.trim();
+  const iframe = new DOMParser().parseFromString(value, "text/html").querySelector("iframe");
+  const rawSrc = iframe?.getAttribute("src")?.trim() || value;
+  const src = toEmbeddableUrl(rawSrc);
   if (!src || !/^https:\/\//i.test(src) || /javascript:/i.test(src)) return null;
   return {
     src,
-    title: iframe.getAttribute("title") || "Embedded content",
-    allow: iframe.getAttribute("allow") || undefined,
-    allowFullScreen:
-      iframe.hasAttribute("allowfullscreen") ||
-      iframe.hasAttribute("mozallowfullscreen") ||
-      iframe.hasAttribute("webkitallowfullscreen"),
+    title: iframe?.getAttribute("title") || "Embedded content",
+    allow:
+      iframe?.getAttribute("allow") ||
+      "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+    allowFullScreen: true,
   };
+}
+
+function toEmbeddableUrl(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "");
+    const start = getYouTubeStart(url);
+    if (host === "youtu.be") {
+      const id = url.pathname.split("/").filter(Boolean)[0];
+      return id ? withYouTubeStart(`https://www.youtube.com/embed/${id}`, start) : null;
+    }
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (url.pathname.startsWith("/embed/")) return url.toString();
+      if (url.pathname.startsWith("/shorts/")) {
+        const id = url.pathname.split("/").filter(Boolean)[1];
+        return id ? withYouTubeStart(`https://www.youtube.com/embed/${id}`, start) : null;
+      }
+      const id = url.searchParams.get("v");
+      return id ? withYouTubeStart(`https://www.youtube.com/embed/${id}`, start) : url.toString();
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function getYouTubeStart(url) {
+  const raw = url.searchParams.get("start") || url.searchParams.get("t");
+  if (!raw) return null;
+  const match = raw.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/i);
+  if (match && (match[1] || match[2] || match[3])) {
+    return String((Number(match[1]) || 0) * 3600 + (Number(match[2]) || 0) * 60 + (Number(match[3]) || 0));
+  }
+  const seconds = Number.parseInt(raw, 10);
+  return Number.isFinite(seconds) && seconds > 0 ? String(seconds) : null;
+}
+
+function withYouTubeStart(src, start) {
+  if (!start) return src;
+  const url = new URL(src);
+  url.searchParams.set("start", start);
+  return url.toString();
 }
 
 function Button({ variant = "primary", className = "", ...props }) {
@@ -900,32 +945,87 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
 }
 
 function HotspotModal({ hotspot, onClose }) {
+  const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const embed = parseEmbed(hotspot.embedCode);
+  const videoEmbed = hotspot.contentType === "video" ? parseEmbed(hotspot.mediaUrl) : null;
+  const mediaItems = hotspot.mediaItems || [];
+  const activeMedia = mediaItems[activeMediaIndex] || null;
+  const hasManyMedia = mediaItems.length > 1;
+
+  useEffect(() => {
+    setActiveMediaIndex(0);
+  }, [hotspot.id]);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+      if (hotspot.contentType !== "gallery" || !hasManyMedia) return;
+      if (event.key === "ArrowLeft") setActiveMediaIndex((index) => (index - 1 + mediaItems.length) % mediaItems.length);
+      if (event.key === "ArrowRight") setActiveMediaIndex((index) => (index + 1) % mediaItems.length);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hasManyMedia, hotspot.contentType, mediaItems.length, onClose]);
+
+  function showPreviousMedia() {
+    setActiveMediaIndex((index) => (index - 1 + mediaItems.length) % mediaItems.length);
+  }
+
+  function showNextMedia() {
+    setActiveMediaIndex((index) => (index + 1) % mediaItems.length);
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <article className="modal" onClick={(event) => event.stopPropagation()}>
         <Button variant="ghost" className="close" onClick={onClose}>
           <X size={18} />
         </Button>
-        <h2>{hotspot.title || "제목 없는 핫스팟"}</h2>
-        {hotspot.description && <p>{hotspot.description}</p>}
-        {hotspot.link && (
-          <a className="external" href={hotspot.link} target="_blank" rel="noreferrer">
-            링크 열기
-          </a>
-        )}
-        {hotspot.contentType === "video" && hotspot.mediaUrl && <video controls src={hotspot.mediaUrl} />}
-        {hotspot.contentType === "embed" && embed && <iframe title={embed.title} src={embed.src} allow={embed.allow} allowFullScreen={embed.allowFullScreen} />}
-        {hotspot.contentType === "gallery" && (
-          <div className="gallery">
-            {hotspot.mediaItems.map((item) => (
-              <figure key={item.id}>
-                <img src={item.url} alt={item.caption || ""} />
-                {item.caption && <figcaption>{item.caption}</figcaption>}
-              </figure>
-            ))}
+        <div className="modal-body">
+          <div className="modal-copy">
+            <h2>{hotspot.title || "제목 없는 핫스팟"}</h2>
+            {hotspot.description && <p>{hotspot.description}</p>}
+            {hotspot.link && (
+              <a className="external" href={hotspot.link} target="_blank" rel="noreferrer">
+                링크 열기
+              </a>
+            )}
           </div>
-        )}
+          {hotspot.contentType === "video" &&
+            (videoEmbed ? (
+              <div className="embed-frame">
+                <iframe title={videoEmbed.title} src={videoEmbed.src} allow={videoEmbed.allow} allowFullScreen />
+              </div>
+            ) : (
+              hotspot.mediaUrl && <video controls src={hotspot.mediaUrl} />
+            ))}
+          {hotspot.contentType === "embed" && embed && (
+            <div className="embed-frame">
+              <iframe title={embed.title} src={embed.src} allow={embed.allow} allowFullScreen />
+            </div>
+          )}
+          {hotspot.contentType === "gallery" && activeMedia && (
+            <div className="carousel" aria-label="이미지 자료">
+              <figure>
+                <img src={activeMedia.url} alt={activeMedia.caption || hotspot.title || ""} />
+                {activeMedia.caption && <figcaption>{activeMedia.caption}</figcaption>}
+              </figure>
+              {hasManyMedia && (
+                <>
+                  <button className="carousel-arrow prev" onClick={showPreviousMedia} aria-label="이전 이미지">
+                    <ChevronLeft size={24} />
+                  </button>
+                  <button className="carousel-arrow next" onClick={showNextMedia} aria-label="다음 이미지">
+                    <ChevronRight size={24} />
+                  </button>
+                  <div className="carousel-count">
+                    {activeMediaIndex + 1} / {mediaItems.length}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </article>
     </div>
   );
@@ -1373,8 +1473,8 @@ function ViewProject() {
   };
 
   return (
-    <main className="editor-page">
-      <header className="editor-header">
+    <main className="viewer-page">
+      <header className="viewer-header">
         <div className="row">
           <Sparkles size={21} />
           <strong>{project.name}</strong>
@@ -1391,7 +1491,6 @@ function ViewProject() {
         ) : (
           <ImageStage imageUrl={project.imageUrl} {...props} />
         )}
-        <p className="hint">학생용 공유 화면입니다. 이 화면에서는 수정할 수 없습니다.</p>
       </section>
       {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
     </main>
