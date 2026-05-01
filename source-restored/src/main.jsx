@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
+import { Analytics } from "@vercel/analytics/react";
 import {
   ArrowLeft,
   Box,
@@ -37,6 +38,8 @@ const supabaseKey =
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { storage: localStorage, persistSession: true, autoRefreshToken: true },
 });
+
+const VIEW_DEDUPE_WINDOW_MS = 30 * 60 * 1000;
 
 const defaultColor = "#7c3aed";
 const markerColors = ["#7c3aed", "#2563eb", "#0891b2", "#16a34a", "#f59e0b", "#ef4444", "#ec4899", "#111827"];
@@ -88,13 +91,17 @@ function projectFromRow(row) {
     backgroundType: row.background_type || "image",
     ownerId: row.owner_id || null,
     createdAt: new Date(row.created_at).getTime(),
+    viewCount: Number(row.view_count) || 0,
+    lastViewedAt: row.last_viewed_at ? new Date(row.last_viewed_at).getTime() : null,
   };
 }
 
 async function listProjects(userId) {
   if (!userId) return [];
   const { data, error } = await supabase.from("projects").select("*").eq("owner_id", userId).order("created_at", { ascending: false });
-  return error ? [] : (data || []).map(projectFromRow);
+  if (error) return [];
+  const projects = (data || []).map(projectFromRow);
+  return withProjectViewCounts(projects);
 }
 
 async function loadProject(id) {
@@ -136,6 +143,48 @@ async function duplicateProjects(projects, userId) {
   const { data, error } = await supabase.from("projects").insert(rows).select("*");
   if (error) throw new Error(error.message);
   return (data || []).map(projectFromRow);
+}
+
+async function withProjectViewCounts(projects) {
+  if (!projects.length) return projects;
+  const ids = projects.map((project) => project.id);
+  const { data, error } = await supabase.from("project_view_counts").select("*").in("project_id", ids);
+  if (error) return projects;
+  const counts = new Map((data || []).map((row) => [row.project_id, row]));
+  return projects.map((project) => {
+    const count = counts.get(project.id);
+    return {
+      ...project,
+      viewCount: Number(count?.view_count) || 0,
+      lastViewedAt: count?.last_viewed_at ? new Date(count.last_viewed_at).getTime() : null,
+    };
+  });
+}
+
+function getViewerKey() {
+  const key = "tag-and-explore-viewer-key";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  localStorage.setItem(key, created);
+  return created;
+}
+
+async function recordProjectView(projectId) {
+  const viewedKey = `tag-and-explore-viewed:${projectId}`;
+  const lastViewedAt = Number(localStorage.getItem(viewedKey)) || 0;
+  if (Date.now() - lastViewedAt < VIEW_DEDUPE_WINDOW_MS) return false;
+
+  localStorage.setItem(viewedKey, String(Date.now()));
+  const { error } = await supabase.from("project_views").insert({
+    project_id: projectId,
+    viewer_key: getViewerKey(),
+  });
+  if (error) {
+    localStorage.removeItem(viewedKey);
+    return false;
+  }
+  return true;
 }
 
 const DIRECT_UPLOAD_THRESHOLD = 3 * 1024 * 1024;
@@ -629,6 +678,7 @@ function Home({ user, authLoading }) {
                 <div>
                   <h3>{project.name}</h3>
                   <p>{project.hotspots.length}개 핫스팟 · {project.backgroundType}</p>
+                  <p className="project-views">조회 {project.viewCount.toLocaleString("ko-KR")}회</p>
                   {!manageMode && (
                     <div className="row">
                       <Button variant="secondary" onClick={() => navigate(`/editor?id=${project.id}`)}>
@@ -1451,6 +1501,11 @@ function ViewProject() {
     });
   }, [id]);
 
+  useEffect(() => {
+    if (!project?.id) return;
+    recordProjectView(project.id);
+  }, [project?.id]);
+
   if (notFound) {
     return (
       <main className="centered">
@@ -1510,16 +1565,19 @@ function NotFound() {
 function App() {
   const auth = useAuth();
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Home user={auth.user} authLoading={auth.loading} />} />
-        <Route path="/login" element={<AuthPage mode="login" user={auth.user} authLoading={auth.loading} />} />
-        <Route path="/signup" element={<AuthPage mode="signup" user={auth.user} authLoading={auth.loading} />} />
-        <Route path="/editor" element={<Editor user={auth.user} authLoading={auth.loading} />} />
-        <Route path="/view/:id" element={<ViewProject />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </BrowserRouter>
+    <>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Home user={auth.user} authLoading={auth.loading} />} />
+          <Route path="/login" element={<AuthPage mode="login" user={auth.user} authLoading={auth.loading} />} />
+          <Route path="/signup" element={<AuthPage mode="signup" user={auth.user} authLoading={auth.loading} />} />
+          <Route path="/editor" element={<Editor user={auth.user} authLoading={auth.loading} />} />
+          <Route path="/view/:id" element={<ViewProject />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </BrowserRouter>
+      <Analytics />
+    </>
   );
 }
 

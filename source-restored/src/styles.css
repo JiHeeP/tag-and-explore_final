@@ -217,6 +217,13 @@ a {
   color: var(--muted);
 }
 
+.project-card .project-views {
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 800;
+  margin-top: -6px;
+}
+
 .projects {
   margin: 0 auto;
   max-width: 1080px;
