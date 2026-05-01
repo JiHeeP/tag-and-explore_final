@@ -159,6 +159,24 @@ function credentialToEmail(value) {
   return value.trim().toLowerCase();
 }
 
+function authErrorMessage(error, isSignup) {
+  const message = error?.message || "";
+  const lower = message.toLowerCase();
+  if (lower.includes("invalid login credentials")) {
+    return "이메일 또는 비밀번호가 맞지 않습니다. 이미 있는 계정이면 Supabase에서 비밀번호를 직접 다시 설정해 주세요.";
+  }
+  if (lower.includes("already registered") || lower.includes("already exists") || lower.includes("user already")) {
+    return "이미 가입된 이메일입니다. 로그인하거나 비밀번호를 다시 설정해 주세요.";
+  }
+  if (lower.includes("email not confirmed")) {
+    return "이메일 확인이 아직 끝나지 않았습니다. Supabase 사용자 화면에서 Confirmed at 상태를 확인해 주세요.";
+  }
+  if (lower.includes("rate limit")) {
+    return "메일 발송이 잠시 제한되었습니다. 조금 기다린 뒤 다시 시도해 주세요.";
+  }
+  return message || (isSignup ? "가입에 실패했습니다." : "로그인에 실패했습니다.");
+}
+
 function useAuth() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -243,6 +261,12 @@ function AuthPage({ mode, user, authLoading }) {
         ? await supabase.auth.signUp({ email, password })
         : await supabase.auth.signInWithPassword({ email, password });
       if (result.error) throw new Error(result.error.message);
+      if (isSignup && result.data.user && Array.isArray(result.data.user.identities) && result.data.user.identities.length === 0) {
+        setMessage("이미 가입된 이메일입니다. 로그인하거나 Supabase에서 비밀번호를 다시 설정해 주세요.");
+        setPassword("");
+        setPasswordConfirm("");
+        return;
+      }
       if (isSignup && !result.data.session) {
         setMessage("가입이 완료되었습니다. 이제 로그인해 주세요.");
         setPassword("");
@@ -252,7 +276,7 @@ function AuthPage({ mode, user, authLoading }) {
       }
       navigate("/", { replace: true });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "인증에 실패했습니다.");
+      setMessage(authErrorMessage(error, isSignup));
     } finally {
       setBusy(false);
     }
