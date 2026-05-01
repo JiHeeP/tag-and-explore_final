@@ -325,11 +325,27 @@ a {
   width: 100%;
 }
 
+.stage-hint {
+  background: rgb(17 24 39 / 0.78);
+  border-radius: 999px;
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  left: 50%;
+  padding: 8px 12px;
+  pointer-events: none;
+  position: absolute;
+  top: 14px;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
 .image-stage img {
   border-radius: 8px;
   display: block;
   max-height: min(72vh, 720px);
   object-fit: contain;
+  user-select: none;
   width: 100%;
 }
 
@@ -354,6 +370,7 @@ a {
   font-weight: 800;
   height: 42px;
   justify-content: center;
+  touch-action: none;
   position: absolute;
   transform: translate(-50%, -50%);
   width: 42px;

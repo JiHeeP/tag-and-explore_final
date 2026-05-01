@@ -363,37 +363,58 @@ function HotspotMarker({ hotspot, selected, onClick, style, ...props }) {
 
 function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, onMove }) {
   const ref = useRef(null);
+  const imageRef = useRef(null);
+  const [draggingId, setDraggingId] = useState(null);
 
-  function positionFromEvent(event) {
-    const rect = ref.current.getBoundingClientRect();
+  function positionFromPoint(clientX, clientY) {
+    const target = imageRef.current || ref.current;
+    const rect = target.getBoundingClientRect();
     return {
-      x: ((event.clientX - rect.left) / rect.width) * 100,
-      y: ((event.clientY - rect.top) / rect.height) * 100,
+      x: Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100)),
     };
   }
 
   function handleClick(event) {
-    if (!editing || event.target !== ref.current) return;
-    const { x, y } = positionFromEvent(event);
+    if (!editing || event.target.closest?.(".marker")) return;
+    const { x, y } = positionFromPoint(event.clientX, event.clientY);
     onAdd(x, y);
   }
 
-  function handleDragEnd(event, id) {
+  function handleMarkerPointerDown(event, id) {
     if (!editing) return;
-    const { x, y } = positionFromEvent(event);
-    onMove(id, Math.max(0, Math.min(100, x)), Math.max(0, Math.min(100, y)));
+    event.stopPropagation();
+    setDraggingId(id);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleMarkerPointerMove(event, id) {
+    if (!editing || draggingId !== id) return;
+    event.stopPropagation();
+    const { x, y } = positionFromPoint(event.clientX, event.clientY);
+    onMove(id, x, y);
+  }
+
+  function handleMarkerPointerUp(event, id) {
+    if (!editing || draggingId !== id) return;
+    event.stopPropagation();
+    setDraggingId(null);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
   }
 
   return (
     <div className="stage image-stage" ref={ref} onClick={handleClick}>
-      <img src={imageUrl} alt="" />
+      {editing && <div className="stage-hint">Click the image to add a hotspot.</div>}
+      <img ref={imageRef} src={imageUrl} alt="" draggable={false} />
       {hotspots.map((hotspot) => (
         <HotspotMarker
           key={hotspot.id}
           hotspot={hotspot}
           selected={selectedId === hotspot.id}
-          draggable={editing}
-          onDragEnd={(event) => handleDragEnd(event, hotspot.id)}
+          onPointerDown={(event) => handleMarkerPointerDown(event, hotspot.id)}
+          onPointerMove={(event) => handleMarkerPointerMove(event, hotspot.id)}
+          onPointerUp={(event) => handleMarkerPointerUp(event, hotspot.id)}
+          onPointerCancel={() => setDraggingId(null)}
           onClick={(event) => {
             event.stopPropagation();
             onSelect(hotspot.id);
@@ -626,6 +647,7 @@ function Editor({ user, authLoading }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const idParam = params.get("id");
+  const isExistingProject = Boolean(idParam);
   const [projectId, setProjectId] = useState(idParam || crypto.randomUUID());
   const [name, setName] = useState("Untitled Project");
   const [imageUrl, setImageUrl] = useState(null);
@@ -636,25 +658,37 @@ function Editor({ user, authLoading }) {
   const [editing, setEditing] = useState(true);
   const [backgroundType, setBackgroundType] = useState("image");
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [projectLoading, setProjectLoading] = useState(isExistingProject);
+  const [projectMissing, setProjectMissing] = useState(false);
   const fileRef = useRef(null);
 
-  const canEdit = !!user && (!ownerId || ownerId === user.id);
+  const canEdit = !!user && !authLoading && !projectLoading && (!isExistingProject || ownerId === user.id);
   const editingEnabled = canEdit && editing;
 
   useEffect(() => {
     if (idParam) {
       setProjectId(idParam);
+      setProjectLoading(true);
+      setProjectMissing(false);
       loadProject(idParam).then((project) => {
-        if (!project) return;
+        if (!project) {
+          setProjectMissing(true);
+          setProjectLoading(false);
+          return;
+        }
         setName(project.name);
         setImageUrl(project.imageUrl);
         setOwnerId(project.ownerId);
         setHotspots(project.hotspots);
         setBackgroundType(project.backgroundType);
+        setProjectLoading(false);
       });
       return;
     }
     setOwnerId(user?.id || null);
+    setProjectLoading(false);
+    setProjectMissing(false);
   }, [idParam, user]);
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId) || null;
@@ -693,6 +727,10 @@ function Editor({ user, authLoading }) {
 
   async function handleUpload(file) {
     if (!file) return;
+    if (!canEdit) {
+      alert("Log in with the owner account before uploading.");
+      return;
+    }
     if (backgroundType !== "glb" && !file.type.startsWith("image/")) {
       alert("Please upload an image file.");
       return;
@@ -712,15 +750,26 @@ function Editor({ user, authLoading }) {
   }
 
   async function handleSave() {
-    if (!canEdit || !imageUrl || !user) return;
-    await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType }, user.id);
-    setOwnerId(user.id);
-    alert("Project saved successfully.");
+    if (!canEdit || !imageUrl || !user || saving) return false;
+    setSaving(true);
+    try {
+      await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType }, user.id);
+      setOwnerId(user.id);
+      if (!idParam) navigate(`/editor?id=${projectId}`, { replace: true });
+      alert("Project saved successfully.");
+      return true;
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Save failed.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function copyViewLink() {
     if (!imageUrl) return;
-    await handleSave();
+    const saved = await handleSave();
+    if (!saved) return;
     await navigator.clipboard.writeText(`${window.location.origin}/view/${projectId}`);
     alert("View link copied.");
   }
@@ -787,8 +836,8 @@ function Editor({ user, authLoading }) {
           )}
           {imageUrl && canEdit && (
             <>
-              <Button variant="secondary" onClick={handleSave}><Save size={16} /> Save</Button>
-              <Button variant="secondary" onClick={copyViewLink}><Share2 size={16} /> Share</Button>
+              <Button variant="secondary" onClick={handleSave} disabled={saving}><Save size={16} /> {saving ? "Saving..." : "Save"}</Button>
+              <Button variant="secondary" onClick={copyViewLink} disabled={saving}><Share2 size={16} /> Share</Button>
             </>
           )}
           {canEdit && (
@@ -796,17 +845,22 @@ function Editor({ user, authLoading }) {
               <Button variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
                 <Upload size={16} /> {uploading ? "Uploading..." : imageUrl ? "Change" : "Upload"}
               </Button>
-              <input
-                hidden
-                ref={fileRef}
-                type="file"
-                accept={backgroundType === "glb" ? ".glb,.gltf" : "image/*"}
-                onChange={(event) => handleUpload(event.target.files?.[0])}
-              />
+                <input
+                  hidden
+                  ref={fileRef}
+                  type="file"
+                  accept={backgroundType === "glb" ? ".glb,.gltf" : "image/*"}
+                  onChange={(event) => {
+                    handleUpload(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
             </>
           )}
         </div>
       </header>
+      {projectLoading && <div className="readonly">Loading project...</div>}
+      {projectMissing && <div className="readonly">Project not found. The link may be invalid.</div>}
       {!user && <div className="readonly">Log in to create or edit projects. Shared view links are still read-only.</div>}
       {user && ownerId && ownerId !== user.id && <div className="readonly">This project belongs to another account, so it is read-only for you.</div>}
       <div className="editor-grid">
