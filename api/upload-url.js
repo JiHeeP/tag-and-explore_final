@@ -1,9 +1,9 @@
 const {
-  MAX_PROXY_UPLOAD_BYTES,
+  MAX_DIRECT_UPLOAD_BYTES,
   createObjectKey,
+  createPresignedPutUrl,
   getPublicUrl,
   isAllowedMimeType,
-  putObjectToR2,
 } = require("./r2");
 
 function json(res, statusCode, body) {
@@ -16,7 +16,7 @@ async function readJsonBody(req) {
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > MAX_PROXY_UPLOAD_BYTES * 1.4) throw new Error("Upload is too large");
+    if (raw.length > 64 * 1024) throw new Error("Request is too large");
   }
   return JSON.parse(raw || "{}");
 }
@@ -31,24 +31,20 @@ module.exports = async function handler(req, res) {
     const body = await readJsonBody(req);
     const fileName = typeof body.fileName === "string" ? body.fileName : "upload.bin";
     const contentType = typeof body.contentType === "string" ? body.contentType : "application/octet-stream";
-    const base64 = typeof body.base64 === "string" ? body.base64 : "";
+    const size = Number(body.size);
 
-    if (!base64) return json(res, 400, { error: "Missing file data" });
+    if (!Number.isFinite(size) || size <= 0) return json(res, 400, { error: "Missing file size" });
+    if (size > MAX_DIRECT_UPLOAD_BYTES) return json(res, 413, { error: "Upload is too large" });
     if (!isAllowedMimeType(contentType)) return json(res, 400, { error: "Unsupported file type" });
-
-    const fileBuffer = Buffer.from(base64, "base64");
-    if (!fileBuffer.length) return json(res, 400, { error: "Empty file" });
-    if (fileBuffer.length > MAX_PROXY_UPLOAD_BYTES) return json(res, 413, { error: "Upload is too large" });
 
     const key = createObjectKey(fileName, contentType);
 
-    await putObjectToR2({ key, body: fileBuffer, contentType });
-
     return json(res, 200, {
       key,
+      uploadUrl: createPresignedPutUrl({ key, contentType }),
       url: getPublicUrl(key),
     });
   } catch (error) {
-    return json(res, 500, { error: error instanceof Error ? error.message : "Upload failed" });
+    return json(res, 500, { error: error instanceof Error ? error.message : "Could not prepare upload" });
   }
 };

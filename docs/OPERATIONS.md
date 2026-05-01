@@ -108,3 +108,17 @@ Rules:
 - Existing recovered projects were assigned to the owner user created in Supabase Auth.
 
 The SQL used for this is in `supabase/auth-owner-rls.sql`.
+
+Large files and 3D models use `/api/upload-url` to get a short-lived signed R2 URL, then the browser uploads directly to R2. The R2 bucket must allow browser `PUT` requests from the production origin. A minimal CORS rule is:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://YOUR_PRODUCTION_DOMAIN"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["content-type"],
+    "ExposeHeaders": ["etag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```

@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import "./styles.css";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://bnpxshdnckyubwgkwmpx.supabase.co";
@@ -135,7 +136,43 @@ async function duplicateProjects(projects, userId) {
   return (data || []).map(projectFromRow);
 }
 
+const DIRECT_UPLOAD_THRESHOLD = 3 * 1024 * 1024;
+
+function getUploadContentType(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".glb")) return "model/gltf-binary";
+  if (name.endsWith(".gltf")) return "model/gltf+json";
+  return file.type || "application/octet-stream";
+}
+
 async function uploadFile(file) {
+  const contentType = getUploadContentType(file);
+  const shouldUploadDirectly = file.size > DIRECT_UPLOAD_THRESHOLD || /\.(glb|gltf)$/i.test(file.name);
+
+  if (shouldUploadDirectly) {
+    const ticketResponse = await fetch("/api/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: file.name,
+        contentType,
+        size: file.size,
+      }),
+    });
+    const ticket = await ticketResponse.json().catch(() => ({}));
+    if (!ticketResponse.ok || !ticket.uploadUrl || !ticket.url) {
+      throw new Error(ticket.error || "Could not prepare upload.");
+    }
+
+    const uploadResponse = await fetch(ticket.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: file,
+    });
+    if (!uploadResponse.ok) throw new Error("Upload failed while sending the file. Please check the R2 CORS settings.");
+    return ticket.url;
+  }
+
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -150,7 +187,7 @@ async function uploadFile(file) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       fileName: file.name,
-      contentType: file.type || "application/octet-stream",
+      contentType,
       base64,
     }),
   });
@@ -659,7 +696,47 @@ function PanoramaStage(props) {
 }
 
 function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }) {
+  const stageRef = useRef(null);
   const mountRef = useRef(null);
+  const cameraRef = useRef(null);
+  const modelRef = useRef(null);
+  const rendererRef = useRef(null);
+  const hotspotsRef = useRef(hotspots);
+  const markerPositionsRef = useRef({});
+  const [markerPositions, setMarkerPositions] = useState({});
+
+  useEffect(() => {
+    hotspotsRef.current = hotspots;
+  }, [hotspots]);
+
+  function positionFromEvent(event) {
+    const rect = stageRef.current.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * 100,
+      y: ((event.clientY - rect.top) / rect.height) * 100,
+    };
+  }
+
+  function handleDoubleClick(event) {
+    if (!editing || event.target.closest?.(".marker")) return;
+    const camera = cameraRef.current;
+    const model = modelRef.current;
+    const renderer = rendererRef.current;
+    if (!camera || !model || !renderer) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    const pointer = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const hit = raycaster.intersectObject(model, true)[0];
+    if (!hit) return;
+
+    const { x, y } = positionFromEvent(event);
+    onAdd(x, y, hit.point.x, hit.point.y, hit.point.z);
+  }
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -668,33 +745,133 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf4f5f7);
     const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-    camera.position.set(0, 1.2, 4);
+    camera.position.set(0, 0.8, 4);
+    cameraRef.current = camera;
     const renderer = new THREE.WebGLRenderer({ antialias: true });
+    rendererRef.current = renderer;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(width, height);
     mount.appendChild(renderer.domElement);
     scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2));
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.autoRotate = false;
+    controls.enablePan = false;
+    controls.minDistance = 1.6;
+    controls.maxDistance = 7;
     const loader = new GLTFLoader();
-    let model;
-    loader.load(modelUrl, (gltf) => {
-      model = gltf.scene;
-      scene.add(model);
-    });
+    const visibilityRaycaster = new THREE.Raycaster();
+    const cameraPosition = new THREE.Vector3();
     let frame;
+
+    const projectHotspots = () => {
+      const next = {};
+      camera.getWorldPosition(cameraPosition);
+      hotspotsRef.current.forEach((hotspot) => {
+        if (
+          Number.isFinite(hotspot.worldX) &&
+          Number.isFinite(hotspot.worldY) &&
+          Number.isFinite(hotspot.worldZ)
+        ) {
+          const world = new THREE.Vector3(hotspot.worldX, hotspot.worldY, hotspot.worldZ);
+          const projected = world.clone().project(camera);
+          const visible = projected.z >= -1 && projected.z <= 1;
+          let occluded = false;
+
+          if (visible && modelRef.current) {
+            const direction = world.clone().sub(cameraPosition);
+            const distance = direction.length();
+            visibilityRaycaster.set(cameraPosition, direction.normalize());
+            const hit = visibilityRaycaster.intersectObject(modelRef.current, true)[0];
+            occluded = !!hit && hit.distance < distance - 0.03;
+          }
+
+          next[hotspot.id] = {
+            x: ((projected.x + 1) / 2) * 100,
+            y: ((1 - projected.y) / 2) * 100,
+            hidden: !visible || occluded,
+          };
+          return;
+        }
+
+        next[hotspot.id] = {
+          x: Number.isFinite(hotspot.x) ? hotspot.x : 50,
+          y: Number.isFinite(hotspot.y) ? hotspot.y : 50,
+          hidden: false,
+        };
+      });
+      const previous = markerPositionsRef.current;
+      const keys = Object.keys(next);
+      const changed =
+        keys.length !== Object.keys(previous).length ||
+        keys.some((id) => {
+          const before = previous[id];
+          const after = next[id];
+          return (
+            !before ||
+            before.hidden !== after.hidden ||
+            Math.abs(before.x - after.x) > 0.1 ||
+            Math.abs(before.y - after.y) > 0.1
+          );
+        });
+
+      if (changed) {
+        markerPositionsRef.current = next;
+        setMarkerPositions(next);
+      }
+    };
+
+    const render = () => renderer.render(scene, camera);
+    const fitModel = (target) => {
+      const box = new THREE.Box3().setFromObject(target);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxAxis = Math.max(size.x, size.y, size.z) || 1;
+      target.position.sub(center);
+      target.scale.setScalar(2.4 / maxAxis);
+      controls.target.set(0, 0, 0);
+      camera.position.set(0, size.y > size.x ? 0.5 : 0.2, 4);
+      controls.update();
+    };
+    loader.load(modelUrl, (gltf) => {
+      modelRef.current = gltf.scene;
+      fitModel(modelRef.current);
+      scene.add(modelRef.current);
+      projectHotspots();
+      render();
+    });
     const animate = () => {
       frame = requestAnimationFrame(animate);
-      if (model) model.rotation.y += 0.006;
-      renderer.render(scene, camera);
+      controls.update();
+      projectHotspots();
+      render();
     };
     animate();
+    const resizeObserver = new ResizeObserver(() => {
+      const nextWidth = mount.clientWidth || 800;
+      const nextHeight = mount.clientHeight || 480;
+      camera.aspect = nextWidth / nextHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(nextWidth, nextHeight);
+      projectHotspots();
+      render();
+    });
+    resizeObserver.observe(mount);
+    render();
     return () => {
       cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      controls.dispose();
       renderer.dispose();
       mount.replaceChildren();
+      cameraRef.current = null;
+      modelRef.current = null;
+      rendererRef.current = null;
     };
   }, [modelUrl]);
 
   return (
-    <div className="stage model-stage" onDoubleClick={() => editing && onAdd(50, 50)}>
+    <div className="stage model-stage" ref={stageRef} onDoubleClick={handleDoubleClick}>
       <div ref={mountRef} className="model-canvas" />
       {hotspots.map((hotspot) => (
         <HotspotMarker
@@ -705,10 +882,19 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
             event.stopPropagation();
             onSelect(hotspot.id);
           }}
-          style={{ left: `${hotspot.x}%`, top: `${hotspot.y}%` }}
+          style={{
+            left: `${markerPositions[hotspot.id]?.x ?? hotspot.x}%`,
+            top: `${markerPositions[hotspot.id]?.y ?? hotspot.y}%`,
+            opacity: markerPositions[hotspot.id]?.hidden ? 0 : 1,
+            pointerEvents: markerPositions[hotspot.id]?.hidden ? "none" : "auto",
+          }}
         />
       ))}
-      <p className="hint">3D 자료는 더블클릭으로 핫스팟을 추가합니다.</p>
+      <p className="hint">
+        {editing
+          ? "Drag to rotate, scroll to zoom. Double-click the model surface to add a 3D hotspot."
+          : "Drag to rotate and scroll to zoom."}
+      </p>
     </div>
   );
 }
@@ -921,11 +1107,18 @@ function Editor({ user, authLoading }) {
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId) || null;
 
-  function addHotspot(x, y) {
+  function addHotspot(x, y, worldX, worldY, worldZ) {
     const hotspot = {
       id: crypto.randomUUID(),
       x,
       y,
+      ...(Number.isFinite(worldX) &&
+        Number.isFinite(worldY) &&
+        Number.isFinite(worldZ) && {
+          worldX,
+          worldY,
+          worldZ,
+        }),
       title: "",
       description: "",
       icon: "info",
@@ -957,6 +1150,10 @@ function Editor({ user, authLoading }) {
     if (!file) return;
     if (!canEdit) {
       alert("Log in with the owner account before uploading.");
+      return;
+    }
+    if (backgroundType === "glb" && !/\.(glb|gltf)$/i.test(file.name)) {
+      alert("Please upload a .glb or .gltf 3D model.");
       return;
     }
     if (backgroundType !== "glb" && !file.type.startsWith("image/")) {
