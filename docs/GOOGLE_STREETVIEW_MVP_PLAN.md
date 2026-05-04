@@ -130,7 +130,7 @@ Open `GoogleStreetViewImportModal`.
     - Heading (0–360)
     - Pitch (-90 to 90)
     - FOV (10–120)
-    - Size preset (e.g., 1024x576)
+    - Size preset (max 640x640 for the Static Street View API)
 - Footer actions:
   - `미리보기 갱신`
   - `배경으로 사용`
@@ -167,7 +167,9 @@ https://maps.googleapis.com/maps/api/streetview
 - `heading`: default 0
 - `pitch`: default 0
 - `fov`: default 90
-- `size`: default `1024x576`
+- `size`: default `640x640`
+
+Google Street View Static API currently caps image dimensions at 640x640.
 
 Clamp user values to valid ranges before URL generation.
 
