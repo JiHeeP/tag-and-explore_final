@@ -115,10 +115,11 @@ Street View imports use Google Maps Platform keys:
 
 ```text
 GOOGLE_MAPS_API_KEY
+GOOGLE_MAPS_BROWSER_KEY
 VITE_GOOGLE_MAPS_BROWSER_KEY
 ```
 
-Use `GOOGLE_MAPS_API_KEY` only on serverless routes. Restrict it to Geocoding API and Street View Static API. Use `VITE_GOOGLE_MAPS_BROWSER_KEY` in the browser for static image display only, restricted by HTTP referrer to the production domain and localhost.
+Use `GOOGLE_MAPS_API_KEY` only on serverless routes. Restrict it to Geocoding API and Street View Static API. Use `GOOGLE_MAPS_BROWSER_KEY` or `VITE_GOOGLE_MAPS_BROWSER_KEY` for the browser-restricted Street View Static key. The frontend loads that public, referrer-restricted key through `/api/maps-browser-key` so static bundles do not need a build-time key.
 
 Before deploying the Street View importer, run:
 

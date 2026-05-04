@@ -32,6 +32,7 @@ function coordinateLabel(result) {
 }
 
 export default function GoogleStreetViewImportModal({ accessToken, browserKey, onApply, onClose }) {
+  const [runtimeBrowserKey, setRuntimeBrowserKey] = useState(browserKey || "");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -45,14 +46,14 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
   const debounceRef = useRef(null);
 
   const previewUrl = useMemo(() => {
-    if (!selected || !browserKey || metadata?.ok === false) return "";
+    if (!selected || !runtimeBrowserKey || metadata?.ok === false) return "";
     return buildStreetViewUrl({
       lat: metadata?.lat ?? selected.lat,
       lng: metadata?.lng ?? selected.lng,
-      key: browserKey,
+      key: runtimeBrowserKey,
       ...previewParams,
     });
-  }, [browserKey, metadata, previewParams, selected]);
+  }, [metadata, previewParams, runtimeBrowserKey, selected]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -61,6 +62,25 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+    if (runtimeBrowserKey || !accessToken) return;
+    let cancelled = false;
+    fetch("/api/maps-browser-key", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Google Maps key를 불러오지 못했습니다.");
+        if (!cancelled) setRuntimeBrowserKey(payload.apiKey || "");
+      })
+      .catch((keyError) => {
+        if (!cancelled) setError(keyError instanceof Error ? keyError.message : "Google Maps key를 불러오지 못했습니다.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, runtimeBrowserKey]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -125,8 +145,8 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
 
   function refreshPreview(target = selected) {
     if (!target) return;
-    if (!browserKey) {
-      setError("VITE_GOOGLE_MAPS_BROWSER_KEY가 설정되어 있지 않습니다.");
+    if (!runtimeBrowserKey) {
+      setError("GOOGLE_MAPS_BROWSER_KEY가 설정되어 있지 않습니다.");
       return;
     }
     if (getStreetViewPreviewCount() >= STREETVIEW_PREVIEW_LIMIT) {
