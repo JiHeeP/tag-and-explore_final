@@ -6,13 +6,17 @@ import {
   STREETVIEW_DYNAMIC_PROVIDER,
   STREETVIEW_PREVIEW_LIMIT,
   STREETVIEW_PROVIDER,
+  addStreetViewPreviewCount,
   buildStreetViewUrl,
   clampStreetViewParams,
+  findNearbyStreetViewPanos,
   getStreetViewPreviewCount,
   incrementStreetViewPreviewCount,
 } from "../lib/streetview";
 
 const geocodeCache = new Map();
+const panoCandidateCache = new Map();
+const PANO_CANDIDATE_LIMIT = 8;
 
 async function postJson(url, body, accessToken) {
   const response = await fetch(url, {
@@ -40,10 +44,13 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
   const [metadata, setMetadata] = useState(null);
+  const [candidates, setCandidates] = useState([]);
+  const [selectedPanoId, setSelectedPanoId] = useState(null);
   const [draftParams, setDraftParams] = useState(STREETVIEW_DEFAULTS);
   const [previewParams, setPreviewParams] = useState(STREETVIEW_DEFAULTS);
   const [searching, setSearching] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [findingCandidates, setFindingCandidates] = useState(false);
   const [error, setError] = useState("");
   const [previewCount, setPreviewCount] = useState(getStreetViewPreviewCount);
   const debounceRef = useRef(null);
@@ -53,10 +60,11 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
     return buildStreetViewUrl({
       lat: metadata?.lat ?? selected.lat,
       lng: metadata?.lng ?? selected.lng,
+      pano: metadata?.panoId || selectedPanoId,
       key: runtimeBrowserKey,
       ...previewParams,
     });
-  }, [metadata, previewParams, runtimeBrowserKey, selected]);
+  }, [metadata, previewParams, runtimeBrowserKey, selected, selectedPanoId]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -124,6 +132,8 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
   async function selectResult(result) {
     setSelected(result);
     setMetadata(null);
+    setCandidates([]);
+    setSelectedPanoId(null);
     setError("");
     if (!accessToken) {
       setError("로그인 세션을 확인할 수 없습니다. 다시 로그인해 주세요.");
@@ -134,12 +144,114 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
       const payload = await postJson("/api/maps-streetview-metadata", { lat: result.lat, lng: result.lng }, accessToken);
       setMetadata(payload);
       if (!payload.ok) setError(payload.error || "이 위치에는 Street View 이미지가 없습니다.");
-      else refreshPreview(result);
+      else {
+        setSelectedPanoId(payload.panoId || null);
+        setCandidates([
+          {
+            panoId: payload.panoId || `nearest:${payload.lat ?? result.lat},${payload.lng ?? result.lng}`,
+            lat: payload.lat ?? result.lat,
+            lng: payload.lng ?? result.lng,
+            heading: draftParams.heading,
+            pitch: draftParams.pitch,
+            fov: draftParams.fov,
+            copyright: payload.copyright || null,
+            description: "가장 가까운 시점",
+          },
+        ]);
+        refreshPreview(result);
+      }
     } catch (metadataError) {
       setError(metadataError instanceof Error ? metadataError.message : "Street View 정보를 확인하지 못했습니다.");
     } finally {
       setChecking(false);
     }
+  }
+
+  async function findCandidates() {
+    if (!selected || !metadata?.ok) return;
+    if (!runtimeBrowserKey) {
+      setError("GOOGLE_MAPS_BROWSER_KEY가 설정되어 있지 않습니다.");
+      return;
+    }
+    const remaining = STREETVIEW_PREVIEW_LIMIT - getStreetViewPreviewCount();
+    if (remaining <= 0) {
+      setError(`오늘 미리보기 한도 ${STREETVIEW_PREVIEW_LIMIT}회에 도달했습니다.`);
+      return;
+    }
+    const cacheKey = `${selected.placeId || selected.lat}:${selected.lng}`;
+    if (panoCandidateCache.has(cacheKey)) {
+      setCandidates(panoCandidateCache.get(cacheKey));
+      return;
+    }
+
+    setFindingCandidates(true);
+    setError("");
+    try {
+      const maxNewCandidates = Math.min(PANO_CANDIDATE_LIMIT - candidates.length, remaining);
+      if (maxNewCandidates <= 0) {
+        setError(`오늘 미리보기 한도 ${STREETVIEW_PREVIEW_LIMIT}회 안에서 더 불러올 후보가 없습니다.`);
+        return;
+      }
+      const found = await findNearbyStreetViewPanos({
+        apiKey: runtimeBrowserKey,
+        lat: selected.lat,
+        lng: selected.lng,
+        limit: maxNewCandidates,
+      });
+      if (!found.length) {
+        setError("주변 Street View 후보를 더 찾지 못했습니다.");
+        return;
+      }
+      const merged = [
+        ...candidates,
+        ...found.filter((candidate) => !candidates.some((existing) => existing.panoId === candidate.panoId)),
+      ].slice(0, PANO_CANDIDATE_LIMIT);
+      const withUrls = merged.map((candidate) => ({
+        ...candidate,
+        thumbnailUrl:
+          candidate.thumbnailUrl ||
+          buildStreetViewUrl({
+            pano: candidate.panoId,
+            key: runtimeBrowserKey,
+            heading: candidate.heading,
+            pitch: candidate.pitch,
+            fov: candidate.fov,
+            width: 320,
+            height: 180,
+          }),
+      }));
+      panoCandidateCache.set(cacheKey, withUrls);
+      setCandidates(withUrls);
+      const newThumbnailCount = withUrls.filter(
+        (candidate) => !candidates.some((existing) => existing.panoId === candidate.panoId && existing.thumbnailUrl),
+      ).length;
+      setPreviewCount(addStreetViewPreviewCount(newThumbnailCount));
+    } catch (candidateError) {
+      setError(candidateError instanceof Error ? candidateError.message : "주변 Street View 후보를 찾지 못했습니다.");
+    } finally {
+      setFindingCandidates(false);
+    }
+  }
+
+  function selectCandidate(candidate) {
+    if (!candidate) return;
+    const nextParams = clampStreetViewParams({
+      ...draftParams,
+      heading: candidate.heading,
+      pitch: candidate.pitch,
+      fov: candidate.fov,
+    });
+    setSelectedPanoId(candidate.panoId);
+    setDraftParams(nextParams);
+    setPreviewParams(nextParams);
+    setMetadata({
+      ok: true,
+      status: "OK",
+      panoId: candidate.panoId,
+      lat: candidate.lat,
+      lng: candidate.lng,
+      copyright: candidate.copyright || metadata?.copyright || null,
+    });
   }
 
   function updateParam(name, value) {
@@ -169,14 +281,14 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
       sourceHeading: previewParams.heading,
       sourcePitch: previewParams.pitch,
       sourceFov: previewParams.fov,
-      sourcePanoId: metadata.panoId || null,
+      sourcePanoId: metadata.panoId || selectedPanoId || null,
       sourceCopyright: metadata.copyright || null,
     };
 
     if (mode === "dynamic") {
       onApply({
         backgroundType: STREETVIEW_BACKGROUND_TYPE,
-        imageUrl: `google-streetview:${metadata.panoId || `${baseSource.sourceLat},${baseSource.sourceLng}`}`,
+        imageUrl: `google-streetview:${baseSource.sourcePanoId || `${baseSource.sourceLat},${baseSource.sourceLng}`}`,
         sourceProvider: STREETVIEW_DYNAMIC_PROVIDER,
         ...baseSource,
         sourceImageUrl: null,
@@ -252,6 +364,33 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
             {metadata?.copyright && <p className="source-note">{metadata.copyright}</p>}
             {importMode === "dynamic" && (
               <p className="source-note">동적 뷰어는 적용 후 화면을 드래그해 둘러볼 수 있고, 현재 시야 기준으로 핫스팟을 찍습니다.</p>
+            )}
+            {selected && metadata?.ok && (
+              <div className="streetview-candidate-tools">
+                <button className="button secondary" onClick={findCandidates} disabled={findingCandidates} type="button">
+                  <MapPin size={16} /> {findingCandidates ? "후보 찾는 중..." : "주변 시점 찾기"}
+                </button>
+                <span>에펠탑처럼 큰 장소는 여러 시점 중 고를 수 있습니다.</span>
+              </div>
+            )}
+            {candidates.length > 0 && (
+              <div className="streetview-candidates" aria-label="Street View 후보 시점">
+                {candidates.map((candidate, index) => (
+                  <button
+                    className={selectedPanoId === candidate.panoId ? "active" : ""}
+                    key={candidate.panoId}
+                    onClick={() => selectCandidate(candidate)}
+                    type="button"
+                  >
+                    {candidate.thumbnailUrl ? (
+                      <img src={candidate.thumbnailUrl} alt={`Street View 후보 ${index + 1}`} />
+                    ) : (
+                      <span className="streetview-candidate-empty">후보 {index + 1}</span>
+                    )}
+                    <small>{candidate.description || `시점 ${index + 1}`}</small>
+                  </button>
+                ))}
+              </div>
             )}
             <div className="streetview-controls">
               {[

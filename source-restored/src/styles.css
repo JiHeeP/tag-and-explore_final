@@ -950,6 +950,71 @@ a {
   gap: 12px;
 }
 
+.streetview-candidate-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.streetview-candidate-tools span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.streetview-candidates {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.streetview-candidates button {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px;
+  text-align: left;
+}
+
+.streetview-candidates button.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-tint);
+}
+
+.streetview-candidates img,
+.streetview-candidate-empty {
+  aspect-ratio: 16 / 9;
+  background: var(--soft);
+  border-radius: 6px;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.streetview-candidate-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: center;
+}
+
+.streetview-candidates small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .streetview-controls label {
   display: grid;
   gap: 6px;
@@ -1265,6 +1330,10 @@ a {
 
   .streetview-import-grid {
     grid-template-columns: 1fr;
+  }
+
+  .streetview-candidates {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .modal-actions {
