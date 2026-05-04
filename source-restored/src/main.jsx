@@ -382,18 +382,23 @@ function ShareLinkModal({ title = "공유 링크", url, onClose }) {
 
   async function copyLink() {
     setStatus("");
-    inputRef.current?.focus();
-    inputRef.current?.select();
+    const input = inputRef.current;
+    input?.focus();
+    input?.select();
+    input?.setSelectionRange?.(0, url.length);
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url);
-      } else if (!document.execCommand("copy")) {
+      const commandCopied = document.execCommand("copy");
+      const clipboardCopied = navigator.clipboard?.writeText
+        ? await navigator.clipboard.writeText(url).then(() => true).catch(() => false)
+        : false;
+      if (!commandCopied && !clipboardCopied) {
         throw new Error("Copy command failed");
       }
       setStatus("복사 완료");
     } catch {
-      inputRef.current?.focus();
-      inputRef.current?.select();
+      input?.focus();
+      input?.select();
+      input?.setSelectionRange?.(0, url.length);
       setStatus("자동 복사가 막혔습니다. 선택된 링크를 직접 복사해 주세요.");
     }
   }
@@ -410,7 +415,7 @@ function ShareLinkModal({ title = "공유 링크", url, onClose }) {
         </div>
         <div className="share-link-box">
           <input ref={inputRef} value={url} readOnly onFocus={(event) => event.currentTarget.select()} />
-          <Button variant="primary" onClick={copyLink}>
+          <Button variant="primary" onMouseDown={(event) => event.preventDefault()} onClick={copyLink}>
             <Copy size={16} /> 복사
           </Button>
         </div>
