@@ -109,6 +109,25 @@ Rules:
 
 The SQL used for this is in `supabase/auth-owner-rls.sql`.
 
+## Google Street View imports
+
+Street View imports use Google Maps Platform keys:
+
+```text
+GOOGLE_MAPS_API_KEY
+VITE_GOOGLE_MAPS_BROWSER_KEY
+```
+
+Use `GOOGLE_MAPS_API_KEY` only on serverless routes. Restrict it to Geocoding API and Street View Static API. Use `VITE_GOOGLE_MAPS_BROWSER_KEY` in the browser for static image display only, restricted by HTTP referrer to the production domain and localhost.
+
+Before deploying the Street View importer, run:
+
+```text
+supabase/google-streetview-source.sql
+```
+
+This adds optional source metadata columns to `projects` so imported backgrounds can be saved and reopened.
+
 Large files and 3D models use `/api/upload-url` to get a short-lived signed R2 URL, then the browser uploads directly to R2. The R2 bucket must allow browser `PUT` requests from the production origin. A minimal CORS rule is:
 
 ```json

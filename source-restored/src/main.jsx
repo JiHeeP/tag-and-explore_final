@@ -18,6 +18,7 @@ import {
   Info,
   Link as LinkIcon,
   LogOut,
+  MapPinned,
   Plus,
   Save,
   Share2,
@@ -30,6 +31,8 @@ import {
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import GoogleStreetViewImportModal from "./components/GoogleStreetViewImportModal";
+import { STREETVIEW_PROVIDER, emptyStreetViewSource } from "./lib/streetview";
 import "./styles.css";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://bnpxshdnckyubwgkwmpx.supabase.co";
@@ -40,6 +43,7 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 });
 
 const VIEW_DEDUPE_WINDOW_MS = 30 * 60 * 1000;
+const googleMapsBrowserKey = import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 
 const defaultColor = "#7c3aed";
 const markerColors = ["#7c3aed", "#2563eb", "#0891b2", "#16a34a", "#f59e0b", "#ef4444", "#ec4899", "#111827"];
@@ -93,6 +97,16 @@ function projectFromRow(row) {
     createdAt: new Date(row.created_at).getTime(),
     viewCount: Number(row.view_count) || 0,
     lastViewedAt: row.last_viewed_at ? new Date(row.last_viewed_at).getTime() : null,
+    sourceProvider: row.source_provider || null,
+    sourceQuery: row.source_query || null,
+    sourceLat: row.source_lat == null ? null : Number(row.source_lat),
+    sourceLng: row.source_lng == null ? null : Number(row.source_lng),
+    sourceHeading: row.source_heading == null ? null : Number(row.source_heading),
+    sourcePitch: row.source_pitch == null ? null : Number(row.source_pitch),
+    sourceFov: row.source_fov == null ? null : Number(row.source_fov),
+    sourcePanoId: row.source_pano_id || null,
+    sourceImageUrl: row.source_image_url || null,
+    sourceCopyright: row.source_copyright || null,
   };
 }
 
@@ -118,6 +132,16 @@ async function saveProject(project, userId) {
     hotspots: normalizeHotspots(project.hotspots),
     background_type: project.backgroundType,
     owner_id: userId,
+    source_provider: project.sourceProvider || null,
+    source_query: project.sourceQuery || null,
+    source_lat: project.sourceLat ?? null,
+    source_lng: project.sourceLng ?? null,
+    source_heading: project.sourceHeading ?? null,
+    source_pitch: project.sourcePitch ?? null,
+    source_fov: project.sourceFov ?? null,
+    source_pano_id: project.sourcePanoId || null,
+    source_image_url: project.sourceImageUrl || null,
+    source_copyright: project.sourceCopyright || null,
   });
   if (error) throw new Error(error.message);
 }
@@ -139,6 +163,16 @@ async function duplicateProjects(projects, userId) {
     hotspots: normalizeHotspots(project.hotspots).map((hotspot) => ({ ...hotspot, id: crypto.randomUUID() })),
     background_type: project.backgroundType,
     owner_id: userId,
+    source_provider: project.sourceProvider || null,
+    source_query: project.sourceQuery || null,
+    source_lat: project.sourceLat ?? null,
+    source_lng: project.sourceLng ?? null,
+    source_heading: project.sourceHeading ?? null,
+    source_pitch: project.sourcePitch ?? null,
+    source_fov: project.sourceFov ?? null,
+    source_pano_id: project.sourcePanoId || null,
+    source_image_url: project.sourceImageUrl || null,
+    source_copyright: project.sourceCopyright || null,
   }));
   const { data, error } = await supabase.from("projects").insert(rows).select("*");
   if (error) throw new Error(error.message);
@@ -308,6 +342,16 @@ function withYouTubeStart(src, start) {
 
 function Button({ variant = "primary", className = "", ...props }) {
   return <button className={`button ${variant} ${className}`} {...props} />;
+}
+
+function SourceAttribution({ project }) {
+  if (project?.sourceProvider !== STREETVIEW_PROVIDER) return null;
+  return (
+    <p className="source-attribution">
+      Google Street View
+      {project.sourceCopyright ? ` · ${project.sourceCopyright}` : ""}
+    </p>
+  );
 }
 
 function credentialToEmail(value) {
@@ -1207,7 +1251,7 @@ function Inspector({ hotspot, onChange, onDelete }) {
   );
 }
 
-function Editor({ user, authLoading }) {
+function Editor({ user, authLoading, accessToken }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const idParam = params.get("id");
@@ -1221,6 +1265,8 @@ function Editor({ user, authLoading }) {
   const [activeContentId, setActiveContentId] = useState(null);
   const [editing, setEditing] = useState(true);
   const [backgroundType, setBackgroundType] = useState("image");
+  const [sourceMetadata, setSourceMetadata] = useState(emptyStreetViewSource);
+  const [streetViewImportOpen, setStreetViewImportOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [projectLoading, setProjectLoading] = useState(isExistingProject);
@@ -1246,11 +1292,24 @@ function Editor({ user, authLoading }) {
         setOwnerId(project.ownerId);
         setHotspots(project.hotspots);
         setBackgroundType(project.backgroundType);
+        setSourceMetadata({
+          sourceProvider: project.sourceProvider,
+          sourceQuery: project.sourceQuery,
+          sourceLat: project.sourceLat,
+          sourceLng: project.sourceLng,
+          sourceHeading: project.sourceHeading,
+          sourcePitch: project.sourcePitch,
+          sourceFov: project.sourceFov,
+          sourcePanoId: project.sourcePanoId,
+          sourceImageUrl: project.sourceImageUrl,
+          sourceCopyright: project.sourceCopyright,
+        });
         setProjectLoading(false);
       });
       return;
     }
     setOwnerId(user?.id || null);
+    setSourceMetadata(emptyStreetViewSource());
     setProjectLoading(false);
     setProjectMissing(false);
   }, [idParam, user]);
@@ -1314,6 +1373,7 @@ function Editor({ user, authLoading }) {
     try {
       const url = await uploadFile(file);
       setImageUrl(url);
+      setSourceMetadata(emptyStreetViewSource());
       setHotspots([]);
       setSelectedId(null);
       setEditing(true);
@@ -1328,7 +1388,7 @@ function Editor({ user, authLoading }) {
     if (!canEdit || !imageUrl || !user || saving) return false;
     setSaving(true);
     try {
-      await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType }, user.id);
+      await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType, ...sourceMetadata }, user.id);
       setOwnerId(user.id);
       if (!idParam) navigate(`/editor?id=${projectId}`, { replace: true });
       alert("프로젝트를 저장했습니다.");
@@ -1347,6 +1407,28 @@ function Editor({ user, authLoading }) {
     if (!saved) return;
     await navigator.clipboard.writeText(`${window.location.origin}/view/${projectId}`);
     alert("보기 링크를 복사했습니다.");
+  }
+
+  function applyStreetViewBackground(nextSource) {
+    setBackgroundType("image");
+    setImageUrl(nextSource.imageUrl);
+    setSourceMetadata({
+      sourceProvider: nextSource.sourceProvider,
+      sourceQuery: nextSource.sourceQuery,
+      sourceLat: nextSource.sourceLat,
+      sourceLng: nextSource.sourceLng,
+      sourceHeading: nextSource.sourceHeading,
+      sourcePitch: nextSource.sourcePitch,
+      sourceFov: nextSource.sourceFov,
+      sourcePanoId: nextSource.sourcePanoId,
+      sourceImageUrl: nextSource.sourceImageUrl,
+      sourceCopyright: nextSource.sourceCopyright,
+    });
+    setHotspots([]);
+    setSelectedId(null);
+    setActiveContentId(null);
+    setEditing(true);
+    setStreetViewImportOpen(false);
   }
 
   const stage = useMemo(() => {
@@ -1391,6 +1473,7 @@ function Editor({ user, authLoading }) {
                 onClick={() => {
                   setBackgroundType(value);
                   setImageUrl(null);
+                  setSourceMetadata(emptyStreetViewSource());
                   setHotspots([]);
                   setSelectedId(null);
                 }}
@@ -1417,6 +1500,9 @@ function Editor({ user, authLoading }) {
           )}
           {canEdit && (
             <>
+              <Button variant="secondary" onClick={() => setStreetViewImportOpen(true)}>
+                <MapPinned size={16} /> Google Street View
+              </Button>
               <Button variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
                 <Upload size={16} /> {uploading ? "업로드 중..." : imageUrl ? "이미지 교체" : "업로드"}
               </Button>
@@ -1459,7 +1545,10 @@ function Editor({ user, authLoading }) {
         </aside>
         <section className="canvas-area">
           {imageUrl ? (
-            stage
+            <div className="stage-stack">
+              {stage}
+              <SourceAttribution project={sourceMetadata} />
+            </div>
           ) : (
             <button className="upload-empty" disabled={!canEdit} onClick={() => fileRef.current?.click()}>
               <Upload size={34} />
@@ -1479,6 +1568,14 @@ function Editor({ user, authLoading }) {
         </aside>
       </div>
       {!editingEnabled && activeContent && <HotspotModal hotspot={activeContent} onClose={() => setActiveContentId(null)} />}
+      {streetViewImportOpen && (
+        <GoogleStreetViewImportModal
+          accessToken={accessToken}
+          browserKey={googleMapsBrowserKey}
+          onApply={applyStreetViewBackground}
+          onClose={() => setStreetViewImportOpen(false)}
+        />
+      )}
     </main>
   );
 }
@@ -1539,13 +1636,16 @@ function ViewProject() {
         </Button>
       </header>
       <section className="view-canvas">
-        {project.backgroundType === "360" ? (
-          <PanoramaStage imageUrl={project.imageUrl} {...props} />
-        ) : project.backgroundType === "glb" ? (
-          <ModelStage modelUrl={project.imageUrl} {...props} />
-        ) : (
-          <ImageStage imageUrl={project.imageUrl} {...props} />
-        )}
+        <div className="stage-stack">
+          {project.backgroundType === "360" ? (
+            <PanoramaStage imageUrl={project.imageUrl} {...props} />
+          ) : project.backgroundType === "glb" ? (
+            <ModelStage modelUrl={project.imageUrl} {...props} />
+          ) : (
+            <ImageStage imageUrl={project.imageUrl} {...props} />
+          )}
+          <SourceAttribution project={project} />
+        </div>
       </section>
       {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
     </main>
@@ -1571,7 +1671,7 @@ function App() {
           <Route path="/" element={<Home user={auth.user} authLoading={auth.loading} />} />
           <Route path="/login" element={<AuthPage mode="login" user={auth.user} authLoading={auth.loading} />} />
           <Route path="/signup" element={<AuthPage mode="signup" user={auth.user} authLoading={auth.loading} />} />
-          <Route path="/editor" element={<Editor user={auth.user} authLoading={auth.loading} />} />
+          <Route path="/editor" element={<Editor user={auth.user} authLoading={auth.loading} accessToken={auth.session?.access_token || ""} />} />
           <Route path="/view/:id" element={<ViewProject />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
