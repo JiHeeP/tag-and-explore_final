@@ -363,6 +363,63 @@ function SourceAttribution({ project }) {
   );
 }
 
+function ShareLinkModal({ title = "공유 링크", url, onClose }) {
+  const inputRef = useRef(null);
+  const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [url]);
+
+  async function copyLink() {
+    setStatus("");
+    inputRef.current?.focus();
+    inputRef.current?.select();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else if (!document.execCommand("copy")) {
+        throw new Error("Copy command failed");
+      }
+      setStatus("복사 완료");
+    } catch {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+      setStatus("자동 복사가 막혔습니다. 선택된 링크를 직접 복사해 주세요.");
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <article className="modal share-modal" onClick={(event) => event.stopPropagation()}>
+        <Button variant="ghost" className="close" onClick={onClose}>
+          <X size={18} />
+        </Button>
+        <div className="modal-copy">
+          <h2>{title}</h2>
+          <p>아래 주소를 학생이나 동료에게 보내면 보기 화면으로 바로 열립니다.</p>
+        </div>
+        <div className="share-link-box">
+          <input ref={inputRef} value={url} readOnly onFocus={(event) => event.currentTarget.select()} />
+          <Button variant="primary" onClick={copyLink}>
+            <Copy size={16} /> 복사
+          </Button>
+        </div>
+        {status && <p className={`share-status ${status === "복사 완료" ? "success" : "warning"}`}>{status}</p>}
+      </article>
+    </div>
+  );
+}
+
 function useRuntimeGoogleMapsBrowserKey(accessToken) {
   const [apiKey, setApiKey] = useState(googleMapsBrowserKey);
   const [error, setError] = useState("");
@@ -1467,6 +1524,7 @@ function Editor({ user, authLoading, accessToken }) {
   const [backgroundType, setBackgroundType] = useState("image");
   const [sourceMetadata, setSourceMetadata] = useState(emptyStreetViewSource);
   const [streetViewImportOpen, setStreetViewImportOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [projectLoading, setProjectLoading] = useState(isExistingProject);
@@ -1588,14 +1646,14 @@ function Editor({ user, authLoading, accessToken }) {
     }
   }
 
-  async function handleSave() {
+  async function handleSave({ silent = false } = {}) {
     if (!canEdit || !imageUrl || !user || saving) return false;
     setSaving(true);
     try {
       await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType, ...sourceMetadata }, user.id);
       setOwnerId(user.id);
       if (!idParam) navigate(`/editor?id=${projectId}`, { replace: true });
-      alert("프로젝트를 저장했습니다.");
+      if (!silent) alert("프로젝트를 저장했습니다.");
       return true;
     } catch (error) {
       alert(error instanceof Error ? error.message : "저장에 실패했습니다.");
@@ -1607,10 +1665,9 @@ function Editor({ user, authLoading, accessToken }) {
 
   async function copyViewLink() {
     if (!imageUrl) return;
-    const saved = await handleSave();
+    const saved = await handleSave({ silent: true });
     if (!saved) return;
-    await navigator.clipboard.writeText(`${window.location.origin}/view/${projectId}`);
-    alert("보기 링크를 복사했습니다.");
+    setShareUrl(`${window.location.origin}/view/${projectId}`);
   }
 
   function applyStreetViewBackground(nextSource) {
@@ -1808,6 +1865,7 @@ function Editor({ user, authLoading, accessToken }) {
           onClose={() => setStreetViewImportOpen(false)}
         />
       )}
+      {shareUrl && <ShareLinkModal title="프로젝트 공유" url={shareUrl} onClose={() => setShareUrl("")} />}
     </main>
   );
 }
@@ -1818,6 +1876,7 @@ function ViewProject() {
   const [project, setProject] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [activeId, setActiveId] = useState(null);
+  const [shareUrl, setShareUrl] = useState("");
   const mapsKey = useRuntimeGoogleMapsBrowserKey();
 
   useEffect(() => {
@@ -1848,6 +1907,7 @@ function ViewProject() {
   if (!project) return <main className="centered muted">불러오는 중...</main>;
 
   const active = project.hotspots.find((hotspot) => hotspot.id === activeId);
+  const viewShareUrl = `${window.location.origin}/view/${project.id}`;
   const props = {
     hotspots: project.hotspots,
     editing: false,
@@ -1864,9 +1924,14 @@ function ViewProject() {
           <Sparkles size={21} />
           <strong>{project.name}</strong>
         </div>
-        <Button variant="ghost" onClick={() => navigate("/")}>
-          <ArrowLeft size={16} /> 홈
-        </Button>
+        <div className="viewer-actions">
+          <Button variant="secondary" onClick={() => setShareUrl(viewShareUrl)}>
+            <Share2 size={16} /> 공유
+          </Button>
+          <Button variant="ghost" onClick={() => navigate("/")}>
+            <ArrowLeft size={16} /> 홈
+          </Button>
+        </div>
       </header>
       <section className="view-canvas">
         <div className="stage-stack">
@@ -1884,6 +1949,7 @@ function ViewProject() {
         </div>
       </section>
       {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
+      {shareUrl && <ShareLinkModal title="보기 링크 공유" url={shareUrl} onClose={() => setShareUrl("")} />}
     </main>
   );
 }
