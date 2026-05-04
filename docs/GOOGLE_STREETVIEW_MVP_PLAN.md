@@ -24,12 +24,13 @@ Therefore, Street View import is an additive feature, not a rewrite.
 ### In-scope
 - Google-based location search
 - Street View static image preview/selection
+- Dynamic Google Street View viewer selection
 - Save selected Street View image URL as project background
 - Preserve source metadata for later edits
 - Quota-safe UI behavior
 
-### Out-of-scope (for MVP)
-- Live Street View panorama viewer inside app
+### Out-of-scope (for original static MVP)
+- Full custom panorama engine independent of Google Maps
 - Multi-provider support (Kakao/Naver)
 - Route/timeline tour authoring
 - Advanced geospatial overlays
@@ -43,11 +44,12 @@ Therefore, Street View import is an additive feature, not a rewrite.
 2. Enable billing.
 3. Enable APIs:
    - Street View Static API
+   - Maps JavaScript API (for dynamic Street View viewer mode)
    - Geocoding API (or Places API if richer search is needed)
 4. Create API key.
 5. Restrict key:
    - HTTP referrers: production domain + localhost
-   - API restrictions: only enabled APIs above
+   - API restrictions: server key only Geocoding + Street View Static; browser key only Street View Static + Maps JavaScript API
 6. Configure billing budget + alerts.
 
 **Environment variables**
@@ -70,6 +72,8 @@ Add optional project-level fields:
 - `sourceImageUrl: string | null`
 
 These should be persisted with existing project save/load.
+
+Dynamic Street View uses `backgroundType = "streetview"` with the same project-level source latitude/longitude/pano/POV fields. Hotspots in that mode should additionally store `streetHeading`, `streetPitch`, and `streetPanoId` inside each hotspot JSON object.
 
 ---
 

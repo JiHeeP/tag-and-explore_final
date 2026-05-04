@@ -32,7 +32,16 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import GoogleStreetViewImportModal from "./components/GoogleStreetViewImportModal";
-import { STREETVIEW_PROVIDER, emptyStreetViewSource } from "./lib/streetview";
+import {
+  STREETVIEW_BACKGROUND_TYPE,
+  STREETVIEW_DYNAMIC_PROVIDER,
+  STREETVIEW_PROVIDER,
+  emptyStreetViewSource,
+  fovToStreetViewZoom,
+  loadGoogleMapsJavascript,
+  projectStreetViewHotspot,
+  streetViewPointFromScreen,
+} from "./lib/streetview";
 import "./styles.css";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://bnpxshdnckyubwgkwmpx.supabase.co";
@@ -345,13 +354,38 @@ function Button({ variant = "primary", className = "", ...props }) {
 }
 
 function SourceAttribution({ project }) {
-  if (project?.sourceProvider !== STREETVIEW_PROVIDER) return null;
+  if (![STREETVIEW_PROVIDER, STREETVIEW_DYNAMIC_PROVIDER].includes(project?.sourceProvider)) return null;
   return (
     <p className="source-attribution">
       Google Street View
       {project.sourceCopyright ? ` · ${project.sourceCopyright}` : ""}
     </p>
   );
+}
+
+function useRuntimeGoogleMapsBrowserKey(accessToken) {
+  const [apiKey, setApiKey] = useState(googleMapsBrowserKey);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (apiKey) return;
+    let cancelled = false;
+    const headers = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+    fetch("/api/maps-browser-key", { headers })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Google Maps key를 불러오지 못했습니다.");
+        if (!cancelled) setApiKey(payload.apiKey || "");
+      })
+      .catch((keyError) => {
+        if (!cancelled) setError(keyError instanceof Error ? keyError.message : "Google Maps key를 불러오지 못했습니다.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, apiKey]);
+
+  return { apiKey, error };
 }
 
 function credentialToEmail(value) {
@@ -834,6 +868,172 @@ function PanoramaStage(props) {
   );
 }
 
+function GoogleStreetViewStage({ apiKey, project, hotspots, selectedId, editing, onAdd, onSelect }) {
+  const stageRef = useRef(null);
+  const mountRef = useRef(null);
+  const panoramaRef = useRef(null);
+  const [loadError, setLoadError] = useState("");
+  const [pov, setPov] = useState({
+    heading: Number.isFinite(project.sourceHeading) ? project.sourceHeading : 0,
+    pitch: Number.isFinite(project.sourcePitch) ? project.sourcePitch : 0,
+  });
+  const [zoom, setZoom] = useState(fovToStreetViewZoom(project.sourceFov || 90));
+  const [panoId, setPanoId] = useState(project.sourcePanoId || "");
+  const [stageSize, setStageSize] = useState({ width: 1, height: 1 });
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount || !apiKey) return;
+    let cancelled = false;
+    let resizeObserver;
+    let listeners = [];
+
+    loadGoogleMapsJavascript(apiKey)
+      .then((maps) => {
+        if (cancelled) return;
+        const nextPov = {
+          heading: Number.isFinite(project.sourceHeading) ? project.sourceHeading : 0,
+          pitch: Number.isFinite(project.sourcePitch) ? project.sourcePitch : 0,
+        };
+        const panorama = new maps.StreetViewPanorama(mount, {
+          addressControl: false,
+          clickToGo: true,
+          disableDefaultUI: false,
+          fullscreenControl: true,
+          linksControl: true,
+          motionTracking: false,
+          motionTrackingControl: false,
+          panControl: true,
+          position:
+            Number.isFinite(project.sourceLat) && Number.isFinite(project.sourceLng)
+              ? { lat: project.sourceLat, lng: project.sourceLng }
+              : undefined,
+          pov: nextPov,
+          showRoadLabels: false,
+          visible: true,
+          zoom: fovToStreetViewZoom(project.sourceFov || 90),
+        });
+
+        if (project.sourcePanoId) panorama.setPano(project.sourcePanoId);
+        panoramaRef.current = panorama;
+
+        const syncView = () => {
+          setPov(panorama.getPov() || nextPov);
+          setZoom(Number(panorama.getZoom()) || 0);
+          setPanoId(panorama.getPano() || "");
+        };
+
+        listeners = ["pov_changed", "zoom_changed", "pano_changed", "position_changed"].map((eventName) =>
+          panorama.addListener(eventName, syncView),
+        );
+        syncView();
+
+        resizeObserver = new ResizeObserver(() => {
+          const rect = mount.getBoundingClientRect();
+          setStageSize({ width: rect.width || 1, height: rect.height || 1 });
+          maps.event.trigger(panorama, "resize");
+        });
+        resizeObserver.observe(mount);
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "동적 Street View를 불러오지 못했습니다.");
+      });
+
+    return () => {
+      cancelled = true;
+      listeners.forEach((listener) => listener.remove());
+      resizeObserver?.disconnect();
+      panoramaRef.current = null;
+      mount.replaceChildren();
+    };
+  }, [apiKey, project.sourceFov, project.sourceHeading, project.sourceLat, project.sourceLng, project.sourcePanoId, project.sourcePitch]);
+
+  const markerPositions = useMemo(() => {
+    const next = {};
+    hotspots.forEach((hotspot) => {
+      const projected = projectStreetViewHotspot({
+        hotspot,
+        pov,
+        zoom,
+        width: stageSize.width,
+        height: stageSize.height,
+      });
+      next[hotspot.id] = {
+        ...projected,
+        hidden: projected.hidden || (!!hotspot.streetPanoId && !!panoId && hotspot.streetPanoId !== panoId),
+      };
+    });
+    return next;
+  }, [hotspots, panoId, pov, stageSize.height, stageSize.width, zoom]);
+
+  function addHotspotAt(clientX, clientY) {
+    const mount = mountRef.current;
+    const panorama = panoramaRef.current;
+    if (!editing || !mount || !panorama) return;
+    const rect = mount.getBoundingClientRect();
+    const point = streetViewPointFromScreen({
+      clientX,
+      clientY,
+      rect,
+      pov: panorama.getPov(),
+      zoom: Number(panorama.getZoom()) || zoom,
+    });
+    onAdd(
+      Math.max(0, Math.min(100, ((clientX - rect.left) / Math.max(rect.width, 1)) * 100)),
+      Math.max(0, Math.min(100, ((clientY - rect.top) / Math.max(rect.height, 1)) * 100)),
+      undefined,
+      undefined,
+      undefined,
+      { ...point, streetPanoId: panorama.getPano() || project.sourcePanoId || null },
+    );
+  }
+
+  function addHotspotAtCenter() {
+    const mount = mountRef.current;
+    if (!mount) return;
+    const rect = mount.getBoundingClientRect();
+    addHotspotAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
+  function handleDoubleClick(event) {
+    if (!editing || event.target.closest?.(".marker") || event.target.closest?.(".streetview-stage-actions")) return;
+    addHotspotAt(event.clientX, event.clientY);
+  }
+
+  return (
+    <div className="stage streetview-dynamic-stage" ref={stageRef} onDoubleClick={handleDoubleClick}>
+      <div ref={mountRef} className="streetview-canvas" />
+      {!apiKey && <div className="streetview-overlay-message">Google Maps key를 불러오는 중입니다.</div>}
+      {loadError && <div className="streetview-overlay-message error">{loadError}</div>}
+      {hotspots.map((hotspot) => (
+        <HotspotMarker
+          key={hotspot.id}
+          hotspot={hotspot}
+          selected={selectedId === hotspot.id}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(hotspot.id);
+          }}
+          style={{
+            left: `${markerPositions[hotspot.id]?.x ?? hotspot.x}%`,
+            top: `${markerPositions[hotspot.id]?.y ?? hotspot.y}%`,
+            opacity: markerPositions[hotspot.id]?.hidden ? 0 : 1,
+            pointerEvents: markerPositions[hotspot.id]?.hidden ? "none" : "auto",
+          }}
+        />
+      ))}
+      {editing && (
+        <div className="streetview-stage-actions">
+          <button className="button secondary" type="button" onClick={addHotspotAtCenter}>
+            <Plus size={16} /> 화면 중앙에 핫스팟
+          </button>
+          <span>더블클릭해도 현재 시야에 핫스팟을 추가할 수 있습니다.</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }) {
   const stageRef = useRef(null);
   const mountRef = useRef(null);
@@ -1272,6 +1472,7 @@ function Editor({ user, authLoading, accessToken }) {
   const [projectLoading, setProjectLoading] = useState(isExistingProject);
   const [projectMissing, setProjectMissing] = useState(false);
   const fileRef = useRef(null);
+  const mapsKey = useRuntimeGoogleMapsBrowserKey(accessToken);
 
   const canEdit = !!user && !authLoading && !projectLoading && (!isExistingProject || ownerId === user.id);
   const editingEnabled = canEdit && editing;
@@ -1316,7 +1517,7 @@ function Editor({ user, authLoading, accessToken }) {
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId) || null;
 
-  function addHotspot(x, y, worldX, worldY, worldZ) {
+  function addHotspot(x, y, worldX, worldY, worldZ, extra = {}) {
     const hotspot = {
       id: crypto.randomUUID(),
       x,
@@ -1328,6 +1529,7 @@ function Editor({ user, authLoading, accessToken }) {
           worldY,
           worldZ,
         }),
+      ...extra,
       title: "",
       description: "",
       icon: "info",
@@ -1357,15 +1559,16 @@ function Editor({ user, authLoading, accessToken }) {
 
   async function handleUpload(file) {
     if (!file) return;
+    const uploadBackgroundType = backgroundType === STREETVIEW_BACKGROUND_TYPE ? "image" : backgroundType;
     if (!canEdit) {
       alert("Log in with the owner account before uploading.");
       return;
     }
-    if (backgroundType === "glb" && !/\.(glb|gltf)$/i.test(file.name)) {
+    if (uploadBackgroundType === "glb" && !/\.(glb|gltf)$/i.test(file.name)) {
       alert("Please upload a .glb or .gltf 3D model.");
       return;
     }
-    if (backgroundType !== "glb" && !file.type.startsWith("image/")) {
+    if (uploadBackgroundType !== "glb" && !file.type.startsWith("image/")) {
       alert("Please upload an image file.");
       return;
     }
@@ -1373,6 +1576,7 @@ function Editor({ user, authLoading, accessToken }) {
     try {
       const url = await uploadFile(file);
       setImageUrl(url);
+      setBackgroundType(uploadBackgroundType);
       setSourceMetadata(emptyStreetViewSource());
       setHotspots([]);
       setSelectedId(null);
@@ -1410,7 +1614,7 @@ function Editor({ user, authLoading, accessToken }) {
   }
 
   function applyStreetViewBackground(nextSource) {
-    setBackgroundType("image");
+    setBackgroundType(nextSource.backgroundType || "image");
     setImageUrl(nextSource.imageUrl);
     setSourceMetadata({
       sourceProvider: nextSource.sourceProvider,
@@ -1433,6 +1637,7 @@ function Editor({ user, authLoading, accessToken }) {
 
   const stage = useMemo(() => {
     if (!imageUrl) return null;
+    const projectSource = { imageUrl, backgroundType, ...sourceMetadata };
     const props = {
       hotspots,
       selectedId,
@@ -1443,8 +1648,11 @@ function Editor({ user, authLoading, accessToken }) {
     };
     if (backgroundType === "360") return <PanoramaStage imageUrl={imageUrl} {...props} />;
     if (backgroundType === "glb") return <ModelStage modelUrl={imageUrl} {...props} />;
+    if (backgroundType === STREETVIEW_BACKGROUND_TYPE) {
+      return <GoogleStreetViewStage apiKey={mapsKey.apiKey} project={projectSource} {...props} />;
+    }
     return <ImageStage imageUrl={imageUrl} {...props} />;
-  }, [imageUrl, hotspots, selectedId, editingEnabled, backgroundType]);
+  }, [backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, selectedId, sourceMetadata]);
 
   const activeContent = hotspots.find((hotspot) => hotspot.id === activeContentId);
 
@@ -1464,6 +1672,7 @@ function Editor({ user, authLoading, accessToken }) {
             {[
               ["image", "이미지", FileImage],
               ["360", "360", Globe2],
+              [STREETVIEW_BACKGROUND_TYPE, "Street View", MapPinned],
               ["glb", "3D", Box],
             ].map(([value, label, Icon]) => (
               <button
@@ -1471,6 +1680,10 @@ function Editor({ user, authLoading, accessToken }) {
                 disabled={!canEdit}
                 key={value}
                 onClick={() => {
+                  if (value === STREETVIEW_BACKGROUND_TYPE) {
+                    setStreetViewImportOpen(true);
+                    return;
+                  }
                   setBackgroundType(value);
                   setImageUrl(null);
                   setSourceMetadata(emptyStreetViewSource());
@@ -1548,12 +1761,31 @@ function Editor({ user, authLoading, accessToken }) {
             <div className="stage-stack">
               {stage}
               <SourceAttribution project={sourceMetadata} />
+              {mapsKey.error && backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
             </div>
           ) : (
-            <button className="upload-empty" disabled={!canEdit} onClick={() => fileRef.current?.click()}>
-              <Upload size={34} />
-              <strong>{backgroundType === "glb" ? "3D 모델(.glb) 업로드" : backgroundType === "360" ? "360° 이미지 업로드" : "이미지 업로드"}</strong>
-              <span>{canEdit ? "업로드 후 이미지를 클릭해 핫스팟을 추가하세요." : "이 링크에서는 편집하거나 업로드할 수 없습니다."}</span>
+            <button
+              className="upload-empty"
+              disabled={!canEdit}
+              onClick={() => (backgroundType === STREETVIEW_BACKGROUND_TYPE ? setStreetViewImportOpen(true) : fileRef.current?.click())}
+            >
+              {backgroundType === STREETVIEW_BACKGROUND_TYPE ? <MapPinned size={34} /> : <Upload size={34} />}
+              <strong>
+                {backgroundType === "glb"
+                  ? "3D 모델(.glb) 업로드"
+                  : backgroundType === "360"
+                    ? "360° 이미지 업로드"
+                    : backgroundType === STREETVIEW_BACKGROUND_TYPE
+                      ? "Google Street View 가져오기"
+                      : "이미지 업로드"}
+              </strong>
+              <span>
+                {canEdit
+                  ? backgroundType === STREETVIEW_BACKGROUND_TYPE
+                    ? "장소를 검색해 움직이는 Street View 배경을 선택하세요."
+                    : "업로드 후 이미지를 클릭해 핫스팟을 추가하세요."
+                  : "이 링크에서는 편집하거나 업로드할 수 없습니다."}
+              </span>
             </button>
           )}
         </section>
@@ -1571,7 +1803,7 @@ function Editor({ user, authLoading, accessToken }) {
       {streetViewImportOpen && (
         <GoogleStreetViewImportModal
           accessToken={accessToken}
-          browserKey={googleMapsBrowserKey}
+          browserKey={mapsKey.apiKey}
           onApply={applyStreetViewBackground}
           onClose={() => setStreetViewImportOpen(false)}
         />
@@ -1586,6 +1818,7 @@ function ViewProject() {
   const [project, setProject] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [activeId, setActiveId] = useState(null);
+  const mapsKey = useRuntimeGoogleMapsBrowserKey();
 
   useEffect(() => {
     if (!id) {
@@ -1641,10 +1874,13 @@ function ViewProject() {
             <PanoramaStage imageUrl={project.imageUrl} {...props} />
           ) : project.backgroundType === "glb" ? (
             <ModelStage modelUrl={project.imageUrl} {...props} />
+          ) : project.backgroundType === STREETVIEW_BACKGROUND_TYPE ? (
+            <GoogleStreetViewStage apiKey={mapsKey.apiKey} project={project} {...props} />
           ) : (
             <ImageStage imageUrl={project.imageUrl} {...props} />
           )}
           <SourceAttribution project={project} />
+          {mapsKey.error && project.backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
         </div>
       </section>
       {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}

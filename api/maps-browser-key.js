@@ -1,5 +1,3 @@
-const { requireAuthenticatedUser } = require("./maps-auth");
-
 function json(res, statusCode, body) {
   res.statusCode = statusCode;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -13,8 +11,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    await requireAuthenticatedUser(req);
-
     const apiKey = process.env.GOOGLE_MAPS_BROWSER_KEY || process.env.VITE_GOOGLE_MAPS_BROWSER_KEY;
     if (!apiKey) return json(res, 500, { error: "GOOGLE_MAPS_BROWSER_KEY is not configured" });
 

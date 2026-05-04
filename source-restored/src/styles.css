@@ -847,6 +847,11 @@ a {
   margin-top: 22px;
 }
 
+.streetview-mode-switch {
+  margin-top: 16px;
+  width: max-content;
+}
+
 .streetview-search-panel,
 .streetview-preview-panel {
   display: grid;
@@ -964,6 +969,68 @@ a {
   font-weight: 700;
   margin: 16px 0 0;
   padding: 10px 12px;
+}
+
+.streetview-dynamic-stage,
+.streetview-canvas {
+  height: min(68vh, 760px);
+  min-height: 520px;
+  width: min(1180px, 100%);
+}
+
+.streetview-dynamic-stage {
+  background: var(--soft);
+  overflow: hidden;
+  position: relative;
+}
+
+.streetview-canvas {
+  inset: 0;
+  position: absolute;
+}
+
+.streetview-dynamic-stage .marker {
+  z-index: 8;
+}
+
+.streetview-overlay-message {
+  background: rgb(255 255 255 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-weight: 800;
+  left: 50%;
+  padding: 12px 14px;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+}
+
+.streetview-overlay-message.error {
+  color: #991b1b;
+}
+
+.streetview-stage-actions {
+  align-items: center;
+  background: rgb(255 255 255 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  left: 14px;
+  max-width: calc(100% - 28px);
+  padding: 10px;
+  position: absolute;
+  z-index: 9;
+}
+
+.streetview-stage-actions span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .modal-actions {
@@ -1119,7 +1186,9 @@ a {
 }
 
 .viewer-page .model-stage,
-.viewer-page .model-canvas {
+.viewer-page .model-canvas,
+.viewer-page .streetview-dynamic-stage,
+.viewer-page .streetview-canvas {
   height: calc(100vh - 112px);
   min-height: 620px;
   width: min(1480px, calc(100vw - clamp(28px, 4vw, 56px)));
@@ -1181,7 +1250,9 @@ a {
   }
 
   .viewer-page .model-stage,
-  .viewer-page .model-canvas {
+  .viewer-page .model-canvas,
+  .viewer-page .streetview-dynamic-stage,
+  .viewer-page .streetview-canvas {
     height: calc(100vh - 134px);
     min-height: 420px;
     width: calc(100vw - 24px);

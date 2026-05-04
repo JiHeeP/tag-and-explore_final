@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, RefreshCw, Search, X } from "lucide-react";
 import {
   STREETVIEW_DEFAULTS,
+  STREETVIEW_BACKGROUND_TYPE,
+  STREETVIEW_DYNAMIC_PROVIDER,
   STREETVIEW_PREVIEW_LIMIT,
   STREETVIEW_PROVIDER,
   buildStreetViewUrl,
@@ -33,6 +35,7 @@ function coordinateLabel(result) {
 
 export default function GoogleStreetViewImportModal({ accessToken, browserKey, onApply, onClose }) {
   const [runtimeBrowserKey, setRuntimeBrowserKey] = useState(browserKey || "");
+  const [importMode, setImportMode] = useState("dynamic");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -157,11 +160,9 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
     setPreviewCount(incrementStreetViewPreviewCount());
   }
 
-  function applyBackground() {
+  function applyBackground(mode = importMode) {
     if (!selected || !metadata?.ok || !previewUrl) return;
-    onApply({
-      imageUrl: previewUrl,
-      sourceProvider: STREETVIEW_PROVIDER,
+    const baseSource = {
       sourceQuery: query.trim() || selected.formattedAddress,
       sourceLat: metadata.lat ?? selected.lat,
       sourceLng: metadata.lng ?? selected.lng,
@@ -169,8 +170,26 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
       sourcePitch: previewParams.pitch,
       sourceFov: previewParams.fov,
       sourcePanoId: metadata.panoId || null,
-      sourceImageUrl: previewUrl,
       sourceCopyright: metadata.copyright || null,
+    };
+
+    if (mode === "dynamic") {
+      onApply({
+        backgroundType: STREETVIEW_BACKGROUND_TYPE,
+        imageUrl: `google-streetview:${metadata.panoId || `${baseSource.sourceLat},${baseSource.sourceLng}`}`,
+        sourceProvider: STREETVIEW_DYNAMIC_PROVIDER,
+        ...baseSource,
+        sourceImageUrl: null,
+      });
+      return;
+    }
+
+    onApply({
+      backgroundType: "image",
+      imageUrl: previewUrl,
+      sourceProvider: STREETVIEW_PROVIDER,
+      ...baseSource,
+      sourceImageUrl: previewUrl,
     });
   }
 
@@ -182,7 +201,15 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
         </button>
         <div className="modal-copy">
           <h2>Google Street View 가져오기</h2>
-          <p>장소를 검색하고 정적 Street View 이미지를 프로젝트 배경으로 사용합니다.</p>
+          <p>장소를 검색하고 움직이는 Street View 뷰어 또는 정적 이미지를 프로젝트 배경으로 사용합니다.</p>
+        </div>
+        <div className="segmented compact streetview-mode-switch">
+          <button className={importMode === "dynamic" ? "active" : ""} onClick={() => setImportMode("dynamic")} type="button">
+            동적 뷰어
+          </button>
+          <button className={importMode === "static" ? "active" : ""} onClick={() => setImportMode("static")} type="button">
+            정적 이미지
+          </button>
         </div>
         <div className="streetview-import-grid">
           <section className="streetview-search-panel">
@@ -223,6 +250,9 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
               )}
             </div>
             {metadata?.copyright && <p className="source-note">{metadata.copyright}</p>}
+            {importMode === "dynamic" && (
+              <p className="source-note">동적 뷰어는 적용 후 화면을 드래그해 둘러볼 수 있고, 현재 시야 기준으로 핫스팟을 찍습니다.</p>
+            )}
             <div className="streetview-controls">
               {[
                 ["heading", "방향", 0, 360],
@@ -251,8 +281,8 @@ export default function GoogleStreetViewImportModal({ accessToken, browserKey, o
           <button className="button secondary" onClick={refreshPreview} disabled={!selected || checking} type="button">
             <RefreshCw size={16} /> 미리보기 갱신
           </button>
-          <button className="button primary" onClick={applyBackground} disabled={!metadata?.ok || !previewUrl} type="button">
-            배경으로 사용
+          <button className="button primary" onClick={() => applyBackground()} disabled={!metadata?.ok || !previewUrl} type="button">
+            {importMode === "dynamic" ? "동적 배경으로 사용" : "이미지 배경으로 사용"}
           </button>
         </div>
       </article>
