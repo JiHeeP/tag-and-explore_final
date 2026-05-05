@@ -744,8 +744,32 @@ a {
   width: 100%;
 }
 
-.upload-empty span {
+.upload-empty > span {
   color: var(--muted);
+}
+
+.upload-guidance {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  max-width: 380px;
+  text-align: center;
+  width: 100%;
+}
+
+.upload-guidance-note {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.upload-guidance-list {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  line-height: 1.45;
 }
 
 .readonly {

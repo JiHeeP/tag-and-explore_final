@@ -231,6 +231,34 @@ async function recordProjectView(projectId) {
 }
 
 const DIRECT_UPLOAD_THRESHOLD = 3 * 1024 * 1024;
+const MIN_UPLOAD_BYTES = 1024;
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const UPLOAD_GUIDANCE = {
+  image: {
+    title: "이미지 업로드",
+    description: "업로드 후 이미지를 클릭해 핫스팟을 추가하세요.",
+    note: "선명한 배경은 2560x1440 이상이 좋아요.",
+    details: ["최적: 3000x1688~3840x2160", "권장 용량: 10MB 이하", "업로드 가능: 1KB~100MB"],
+  },
+  "360": {
+    title: "360° 이미지 업로드",
+    description: "2:1 비율의 파노라마 이미지를 올려주세요.",
+    note: "360 사진은 4096x2048 이상이면 안정적이에요.",
+    details: ["형식: JPG/PNG/WebP", "권장 용량: 20MB 이하", "업로드 가능: 1KB~100MB"],
+  },
+  glb: {
+    title: "3D 모델 업로드",
+    description: ".glb 또는 .gltf 파일을 올려 3D 배경을 만드세요.",
+    note: "가벼운 모델일수록 학생 화면에서 빠르게 열려요.",
+    details: ["권장: 50MB 이하", "텍스처: 2048px 이하 권장", "업로드 가능: 1KB~100MB"],
+  },
+  [STREETVIEW_BACKGROUND_TYPE]: {
+    title: "Street View 가져오기",
+    description: "장소를 검색해 움직이는 Street View 배경을 선택하세요.",
+    note: "파일 업로드 없이 Google API 사용량만 계산됩니다.",
+    details: ["검색 후 파노라마 선택", "핫스팟은 기존 방식 그대로 추가", "파일 용량 제한 없음"],
+  },
+};
 
 function getUploadContentType(file) {
   const name = file.name.toLowerCase();
@@ -1627,6 +1655,14 @@ function Editor({ user, authLoading, accessToken }) {
       alert("Log in with the owner account before uploading.");
       return;
     }
+    if (file.size < MIN_UPLOAD_BYTES) {
+      alert("1KB 이상인 파일을 업로드해주세요.");
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      alert("파일은 최대 100MB까지 업로드할 수 있습니다.");
+      return;
+    }
     if (uploadBackgroundType === "glb" && !/\.(glb|gltf)$/i.test(file.name)) {
       alert("Please upload a .glb or .gltf 3D model.");
       return;
@@ -1717,6 +1753,7 @@ function Editor({ user, authLoading, accessToken }) {
   }, [backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, selectedId, sourceMetadata]);
 
   const activeContent = hotspots.find((hotspot) => hotspot.id === activeContentId);
+  const uploadGuidance = UPLOAD_GUIDANCE[backgroundType] || UPLOAD_GUIDANCE.image;
 
   return (
     <main className="editor-page">
@@ -1775,9 +1812,6 @@ function Editor({ user, authLoading, accessToken }) {
           )}
           {canEdit && (
             <>
-              <Button variant="secondary" onClick={() => setStreetViewImportOpen(true)}>
-                <MapPinned size={16} /> Google Street View
-              </Button>
               <Button variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
                 <Upload size={16} /> {uploading ? "업로드 중..." : imageUrl ? "이미지 교체" : "업로드"}
               </Button>
@@ -1832,22 +1866,22 @@ function Editor({ user, authLoading, accessToken }) {
               onClick={() => (backgroundType === STREETVIEW_BACKGROUND_TYPE ? setStreetViewImportOpen(true) : fileRef.current?.click())}
             >
               {backgroundType === STREETVIEW_BACKGROUND_TYPE ? <MapPinned size={34} /> : <Upload size={34} />}
-              <strong>
-                {backgroundType === "glb"
-                  ? "3D 모델(.glb) 업로드"
-                  : backgroundType === "360"
-                    ? "360° 이미지 업로드"
-                    : backgroundType === STREETVIEW_BACKGROUND_TYPE
-                      ? "Google Street View 가져오기"
-                      : "이미지 업로드"}
-              </strong>
+              <strong>{uploadGuidance.title}</strong>
               <span>
                 {canEdit
-                  ? backgroundType === STREETVIEW_BACKGROUND_TYPE
-                    ? "장소를 검색해 움직이는 Street View 배경을 선택하세요."
-                    : "업로드 후 이미지를 클릭해 핫스팟을 추가하세요."
+                  ? uploadGuidance.description
                   : "이 링크에서는 편집하거나 업로드할 수 없습니다."}
               </span>
+              {canEdit && (
+                <span className="upload-guidance" aria-label="업로드 권장 조건">
+                  <span className="upload-guidance-note">{uploadGuidance.note}</span>
+                  <span className="upload-guidance-list">
+                    {uploadGuidance.details.map((detail) => (
+                      <span key={detail}>{detail}</span>
+                    ))}
+                  </span>
+                </span>
+              )}
             </button>
           )}
         </section>
