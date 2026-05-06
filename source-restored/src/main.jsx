@@ -53,6 +53,8 @@ const supabase = createClient(supabaseUrl, supabaseKey, {
 
 const VIEW_DEDUPE_WINDOW_MS = 30 * 60 * 1000;
 const googleMapsBrowserKey = import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+const publicGalleryOwnerId =
+  import.meta.env.VITE_PUBLIC_GALLERY_OWNER_ID || "90276ea9-4119-4067-ace3-6da725d9f885";
 
 const defaultColor = "#7c3aed";
 const markerColors = ["#7c3aed", "#2563eb", "#0891b2", "#16a34a", "#f59e0b", "#ef4444", "#ec4899", "#111827"];
@@ -122,6 +124,18 @@ function projectFromRow(row) {
 async function listProjects(userId) {
   if (!userId) return [];
   const { data, error } = await supabase.from("projects").select("*").eq("owner_id", userId).order("created_at", { ascending: false });
+  if (error) return [];
+  const projects = (data || []).map(projectFromRow);
+  return withProjectViewCounts(projects);
+}
+
+async function listPublicGalleryProjects() {
+  if (!publicGalleryOwnerId) return [];
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .eq("owner_id", publicGalleryOwnerId)
+    .order("created_at", { ascending: false });
   if (error) return [];
   const projects = (data || []).map(projectFromRow);
   return withProjectViewCounts(projects);
@@ -669,21 +683,26 @@ function Home({ user, authLoading }) {
   const [manageBusy, setManageBusy] = useState(false);
   const [manageMessage, setManageMessage] = useState("");
   const [deletePending, setDeletePending] = useState(false);
+  const galleryMode = !user;
 
   const refresh = useCallback(() => {
-    if (!user) {
-      setProjects([]);
-      setLoading(false);
+    if (authLoading) {
+      setLoading(true);
       setManageMode(false);
       setSelectedIds([]);
       return;
     }
     setLoading(true);
-    listProjects(user.id).then((items) => {
+    const loader = user ? listProjects(user.id) : listPublicGalleryProjects();
+    loader.then((items) => {
       setProjects(items);
       setLoading(false);
     });
-  }, [user]);
+    if (!user) {
+      setManageMode(false);
+      setSelectedIds([]);
+    }
+  }, [authLoading, user]);
 
   useEffect(refresh, [refresh]);
 
@@ -799,7 +818,7 @@ function Home({ user, authLoading }) {
       <section className="projects">
         <div className="projects-heading">
           <div>
-            <h2>내 학습 콘텐츠</h2>
+            <h2>{galleryMode ? "갤러리" : "내 학습 콘텐츠"}</h2>
             {user && manageMessage && <p className="manage-message">{manageMessage}</p>}
           </div>
           {user && projects.length > 0 && (
@@ -824,9 +843,7 @@ function Home({ user, authLoading }) {
             )}
           </div>
         )}
-        {!user ? (
-          <p className="muted">로그인하면 내 프로젝트가 여기에 표시됩니다. 공유받은 보기 링크는 로그인 없이도 열립니다.</p>
-        ) : loading ? (
+        {loading ? (
           <p className="muted">프로젝트를 불러오는 중...</p>
         ) : projects.length ? (
           <div className="project-grid">
@@ -849,10 +866,12 @@ function Home({ user, authLoading }) {
                   <p className="project-views">조회 {project.viewCount.toLocaleString("ko-KR")}회</p>
                   {!manageMode && (
                     <div className="row">
-                      <Button variant="secondary" onClick={() => navigate(`/editor?id=${project.id}`)}>
-                        수정
-                      </Button>
-                      <Button variant="ghost" onClick={() => navigate(`/view/${project.id}`)}>
+                      {user && (
+                        <Button variant="secondary" onClick={() => navigate(`/editor?id=${project.id}`)}>
+                          수정
+                        </Button>
+                      )}
+                      <Button variant={user ? "ghost" : "secondary"} onClick={() => navigate(`/view/${project.id}`)}>
                         보기
                       </Button>
                     </div>
@@ -862,7 +881,7 @@ function Home({ user, authLoading }) {
             ))}
           </div>
         ) : (
-          <p className="muted">아직 프로젝트가 없습니다.</p>
+          <p className="muted">{galleryMode ? "갤러리에 표시할 콘텐츠가 없습니다." : "아직 프로젝트가 없습니다."}</p>
         )}
       </section>
     </main>
