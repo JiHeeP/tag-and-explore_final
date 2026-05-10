@@ -1152,6 +1152,8 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
   const hotspotsRef = useRef(hotspots);
   const markerPositionsRef = useRef({});
   const [markerPositions, setMarkerPositions] = useState({});
+  const [modelStatus, setModelStatus] = useState("loading");
+  const [modelMessage, setModelMessage] = useState("");
 
   useEffect(() => {
     hotspotsRef.current = hotspots;
@@ -1165,28 +1167,47 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
     };
   }
 
-  function handleDoubleClick(event) {
-    if (!editing || event.target.closest?.(".marker")) return;
+  function addHotspotFromClientPoint(clientX, clientY) {
     const camera = cameraRef.current;
     const model = modelRef.current;
     const renderer = rendererRef.current;
-    if (!camera || !model || !renderer) return;
+    if (!camera || !model || !renderer) return false;
 
     const rect = renderer.domElement.getBoundingClientRect();
     const pointer = new THREE.Vector2(
-      ((event.clientX - rect.left) / rect.width) * 2 - 1,
-      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -(((clientY - rect.top) / rect.height) * 2 - 1),
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(pointer, camera);
     const hit = raycaster.intersectObject(model, true)[0];
-    if (!hit) return;
+    if (!hit) return false;
 
-    const { x, y } = positionFromEvent(event);
+    const { x, y } = positionFromEvent({ clientX, clientY });
     onAdd(x, y, hit.point.x, hit.point.y, hit.point.z);
+    setModelMessage("");
+    return true;
+  }
+
+  function handleDoubleClick(event) {
+    if (!editing || event.target.closest?.(".marker") || event.target.closest?.(".model-stage-actions")) return;
+    const added = addHotspotFromClientPoint(event.clientX, event.clientY);
+    if (!added) setModelMessage("모델 표면을 더블클릭해야 핫스팟을 추가할 수 있습니다.");
+  }
+
+  function addHotspotAtCenter() {
+    const renderer = rendererRef.current;
+    if (!editing || !renderer) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const added = addHotspotFromClientPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    if (!added) setModelMessage("화면 중앙에 모델 표면이 오도록 돌린 뒤 다시 눌러주세요.");
   }
 
   useEffect(() => {
+    setModelStatus("loading");
+    setModelMessage("");
+    setMarkerPositions({});
+    markerPositionsRef.current = {};
     const mount = mountRef.current;
     const width = mount.clientWidth || 800;
     const height = mount.clientHeight || 480;
@@ -1275,19 +1296,37 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
       const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-      target.position.sub(center);
-      target.scale.setScalar(2.4 / maxAxis);
+      const scale = 2.4 / maxAxis;
+      const fittedSize = size.clone().multiplyScalar(scale);
+      const viewRadius = Math.max(fittedSize.length() / 2, 1);
+
+      target.scale.setScalar(scale);
+      target.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
       controls.target.set(0, 0, 0);
-      camera.position.set(0, size.y > size.x ? 0.5 : 0.2, 4);
+      controls.minDistance = Math.max(viewRadius * 0.4, 0.8);
+      controls.maxDistance = Math.max(viewRadius * 6, 7);
+      camera.near = Math.max(viewRadius / 100, 0.01);
+      camera.far = Math.max(viewRadius * 100, 1000);
+      camera.position.set(0, fittedSize.y > fittedSize.x ? viewRadius * 0.35 : viewRadius * 0.15, viewRadius * 2.5);
+      camera.updateProjectionMatrix();
       controls.update();
     };
-    loader.load(modelUrl, (gltf) => {
-      modelRef.current = gltf.scene;
-      fitModel(modelRef.current);
-      scene.add(modelRef.current);
-      projectHotspots();
-      render();
-    });
+    loader.load(
+      modelUrl,
+      (gltf) => {
+        modelRef.current = gltf.scene;
+        fitModel(modelRef.current);
+        scene.add(modelRef.current);
+        setModelStatus("ready");
+        projectHotspots();
+        render();
+      },
+      undefined,
+      () => {
+        setModelStatus("error");
+        setModelMessage("3D 모델을 불러오지 못했습니다. GLB/GLTF 파일과 업로드 상태를 확인해주세요.");
+      },
+    );
     const animate = () => {
       frame = requestAnimationFrame(animate);
       controls.update();
@@ -1321,6 +1360,11 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
   return (
     <div className="stage model-stage" ref={stageRef} onDoubleClick={handleDoubleClick}>
       <div ref={mountRef} className="model-canvas" />
+      {modelStatus !== "ready" && (
+        <div className={`model-overlay-message ${modelStatus === "error" ? "error" : ""}`}>
+          {modelStatus === "error" ? modelMessage : "3D 모델을 불러오는 중입니다..."}
+        </div>
+      )}
       {hotspots.map((hotspot) => (
         <HotspotMarker
           key={hotspot.id}
@@ -1338,11 +1382,15 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
           }}
         />
       ))}
-      <p className="hint">
-        {editing
-          ? "Drag to rotate, scroll to zoom. Double-click the model surface to add a 3D hotspot."
-          : "Drag to rotate and scroll to zoom."}
-      </p>
+      {editing && (
+        <div className="model-stage-actions">
+          <button className="button secondary" type="button" onClick={addHotspotAtCenter} disabled={modelStatus !== "ready"}>
+            <Plus size={16} /> 화면 중앙에 핫스팟
+          </button>
+          <span>{modelMessage || "모델을 돌리고, 표면을 더블클릭해 핫스팟을 추가하세요."}</span>
+        </div>
+      )}
+      {!editing && <p className="hint">Drag to rotate and scroll to zoom.</p>}
     </div>
   );
 }
