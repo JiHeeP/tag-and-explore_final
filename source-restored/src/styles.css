@@ -576,6 +576,13 @@ a {
 
 .model-canvas {
   height: 540px;
+  width: 100%;
+}
+
+.model-canvas canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 .marker {
@@ -1144,11 +1151,32 @@ a {
   z-index: 12;
 }
 
-.streetview-overlay-message.error {
+.streetview-overlay-message.error,
+.model-overlay-message.error {
   color: #991b1b;
 }
 
-.streetview-stage-actions {
+.model-overlay-message {
+  background: rgb(255 255 255 / 0.92);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  left: 50%;
+  max-width: min(420px, calc(100% - 32px));
+  padding: 10px 12px;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 12;
+}
+
+.streetview-stage-actions,
+.model-stage-actions {
   align-items: center;
   background: rgb(255 255 255 / 0.92);
   border: 1px solid var(--line);
@@ -1164,7 +1192,8 @@ a {
   z-index: 9;
 }
 
-.streetview-stage-actions span {
+.streetview-stage-actions span,
+.model-stage-actions span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
