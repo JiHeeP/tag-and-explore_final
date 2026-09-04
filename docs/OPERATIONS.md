@@ -142,3 +142,31 @@ Large files and 3D models use `/api/upload-url` to get a short-lived signed R2 U
   }
 ]
 ```
+
+## Multi-scene projects (장면 이어 붙이기)
+
+A project can now hold several scenes, ThingLink-style. Each scene has its own
+background (image, 360, 3D, or Street View) and its own hotspots. A hotspot
+with content type `장면 이동` moves the viewer to another scene.
+
+Before saving a project with more than one scene, run once in the Supabase SQL
+editor:
+
+```text
+supabase/project-scenes.sql
+```
+
+It only adds a nullable `scenes` JSONB column to `projects`. Nothing is
+deleted or rewritten.
+
+Behaviour rules:
+
+- Rows without `scenes` are read as a single-scene project built from
+  `image_url`, `background_type`, and `hotspots`.
+- On save, `image_url`, `background_type`, `hotspots`, and `source_*` mirror
+  scene 1, so older bundles and the home cards keep working.
+- If the column is missing, single-scene saves silently fall back to the old
+  columns. Multi-scene saves refuse with a message that names the SQL file, so
+  no scene is lost.
+- Scene 1 must have a background before saving. Students start on scene 1.
+- Deleting a scene clears every hotspot link that pointed at it.

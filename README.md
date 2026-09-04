@@ -26,4 +26,6 @@ To avoid accidental data loss, project deletion has been disabled in the recover
 
 Anonymous Supabase write access was found to be open during recovery. Use `supabase/policies-readonly-lockdown.sql` as the emergency read-only lock if existing shared work must be protected before a proper authenticated editor is added.
 
+Multi-scene projects (ThingLink-style scene transitions) need `supabase/project-scenes.sql` to be run once. See the multi-scene section in `docs/OPERATIONS.md`.
+
 See `docs/OPERATIONS.md` for the recovery notes and beginner-safe operating checklist.
