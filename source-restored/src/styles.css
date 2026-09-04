@@ -1486,3 +1486,200 @@ a {
     right: 10px;
   }
 }
+
+/* Scenes: multi-scene projects with ThingLink-style transitions */
+.scene-panel {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+}
+
+.scene-panel h3 {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.scene-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.scene-row {
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.scene-row.active {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+
+.scene-select {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.scene-thumb {
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  display: flex;
+  flex: none;
+  height: 44px;
+  justify-content: center;
+  overflow: hidden;
+  width: 64px;
+}
+
+.scene-thumb img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.scene-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.scene-meta strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scene-meta small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.scene-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.scene-actions input {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  flex: 1;
+  min-height: 32px;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+.scene-actions input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 0;
+}
+
+.scene-actions .button {
+  padding: 6px;
+}
+
+.scene-badge {
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 4px 12px;
+}
+
+.hotspot-scene-link {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.inspector select {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  min-height: 38px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.inspector select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 0;
+}
+
+.field-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.viewer-scene-label {
+  color: var(--muted);
+  font-size: 13px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.scene-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: min(1480px, calc(100vw - clamp(28px, 4vw, 56px)));
+}
+
+.scene-nav button {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 14px;
+  word-break: keep-all;
+}
+
+.scene-nav button:hover {
+  border-color: var(--accent);
+}
+
+.scene-nav button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.stage.empty-scene {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  justify-content: center;
+  min-height: 320px;
+  padding: 24px;
+  text-align: center;
+}

@@ -12,10 +12,12 @@ import {
   ChevronUp,
   CircleDot,
   Copy,
+  DoorOpen,
   Eye,
   FileImage,
   Globe2,
   Info,
+  Layers,
   Link as LinkIcon,
   LogOut,
   MapPinned,
@@ -63,6 +65,7 @@ const icons = [
   { value: "link", label: "Link", icon: LinkIcon },
   { value: "sparkle", label: "Sparkle", icon: Sparkles },
   { value: "target", label: "Target", icon: CircleDot },
+  { value: "door", label: "장면 이동", icon: DoorOpen },
 ];
 
 function normalizeHotspots(hotspots = []) {
@@ -92,22 +95,35 @@ function normalizeHotspots(hotspots = []) {
         hotspot.contentType ||
         (hotspot.embedCode ? "embed" : mediaItems.length ? "gallery" : hotspot.mediaType === "video" ? "video" : "text"),
       mediaType: hotspot.mediaType || "none",
+      targetSceneId: typeof hotspot.targetSceneId === "string" && hotspot.targetSceneId ? hotspot.targetSceneId : null,
       mediaItems,
     };
   });
 }
 
-function projectFromRow(row) {
+const SOURCE_FIELDS = [
+  "sourceProvider",
+  "sourceQuery",
+  "sourceLat",
+  "sourceLng",
+  "sourceHeading",
+  "sourcePitch",
+  "sourceFov",
+  "sourcePanoId",
+  "sourceImageUrl",
+  "sourceCopyright",
+];
+
+function pickSourceMetadata(scene = {}) {
+  const source = emptyStreetViewSource();
+  SOURCE_FIELDS.forEach((field) => {
+    source[field] = scene[field] ?? null;
+  });
+  return source;
+}
+
+function sourceFromRow(row) {
   return {
-    id: row.id,
-    name: row.name,
-    imageUrl: row.image_url,
-    hotspots: normalizeHotspots(row.hotspots || []),
-    backgroundType: row.background_type || "image",
-    ownerId: row.owner_id || null,
-    createdAt: new Date(row.created_at).getTime(),
-    viewCount: Number(row.view_count) || 0,
-    lastViewedAt: row.last_viewed_at ? new Date(row.last_viewed_at).getTime() : null,
     sourceProvider: row.source_provider || null,
     sourceQuery: row.source_query || null,
     sourceLat: row.source_lat == null ? null : Number(row.source_lat),
@@ -119,6 +135,145 @@ function projectFromRow(row) {
     sourceImageUrl: row.source_image_url || null,
     sourceCopyright: row.source_copyright || null,
   };
+}
+
+function createScene(overrides = {}, index = 0) {
+  return {
+    id: crypto.randomUUID(),
+    name: `장면 ${index + 1}`,
+    backgroundType: "image",
+    imageUrl: null,
+    hotspots: [],
+    ...emptyStreetViewSource(),
+    ...overrides,
+  };
+}
+
+function normalizeScene(scene = {}, index = 0) {
+  return {
+    ...createScene({}, index),
+    ...scene,
+    id: typeof scene.id === "string" && scene.id ? scene.id : crypto.randomUUID(),
+    name: typeof scene.name === "string" && scene.name.trim() ? scene.name : `장면 ${index + 1}`,
+    backgroundType: scene.backgroundType || "image",
+    imageUrl: scene.imageUrl || null,
+    hotspots: normalizeHotspots(Array.isArray(scene.hotspots) ? scene.hotspots : []),
+    ...pickSourceMetadata(scene),
+  };
+}
+
+// A project is an ordered list of scenes. Hotspots with contentType "scene"
+// point at another scene through targetSceneId (ThingLink-style transitions).
+function normalizeScenes(scenes) {
+  const list = Array.isArray(scenes) ? scenes.filter((scene) => scene && typeof scene === "object") : [];
+  if (!list.length) return [createScene()];
+  const normalized = list.map(normalizeScene);
+  const ids = new Set(normalized.map((scene) => scene.id));
+  return normalized.map((scene) => ({
+    ...scene,
+    hotspots: scene.hotspots.map((hotspot) =>
+      hotspot.targetSceneId && !ids.has(hotspot.targetSceneId) ? { ...hotspot, targetSceneId: null } : hotspot,
+    ),
+  }));
+}
+
+function cloneScenes(scenes) {
+  const idMap = new Map(scenes.map((scene) => [scene.id, crypto.randomUUID()]));
+  return scenes.map((scene) => ({
+    ...scene,
+    id: idMap.get(scene.id),
+    hotspots: normalizeHotspots(scene.hotspots).map((hotspot) => ({
+      ...hotspot,
+      id: crypto.randomUUID(),
+      targetSceneId: hotspot.targetSceneId ? idMap.get(hotspot.targetSceneId) || null : null,
+    })),
+  }));
+}
+
+function scenesFromRow(row) {
+  if (Array.isArray(row.scenes) && row.scenes.length) return normalizeScenes(row.scenes);
+  // Legacy single-scene rows: the flat columns become scene 1.
+  return normalizeScenes([
+    {
+      id: row.id ? `${row.id}-scene-1` : undefined,
+      name: "장면 1",
+      backgroundType: row.background_type || "image",
+      imageUrl: row.image_url,
+      hotspots: row.hotspots || [],
+      ...sourceFromRow(row),
+    },
+  ]);
+}
+
+function countHotspots(scenes) {
+  return scenes.reduce((total, scene) => total + scene.hotspots.length, 0);
+}
+
+function projectFromRow(row) {
+  const scenes = scenesFromRow(row);
+  const first = scenes[0];
+  return {
+    id: row.id,
+    name: row.name,
+    scenes,
+    // The flat fields mirror scene 1 so cards, thumbnails and older code keep working.
+    imageUrl: first.imageUrl,
+    hotspots: first.hotspots,
+    backgroundType: first.backgroundType,
+    ownerId: row.owner_id || null,
+    createdAt: new Date(row.created_at).getTime(),
+    viewCount: Number(row.view_count) || 0,
+    lastViewedAt: row.last_viewed_at ? new Date(row.last_viewed_at).getTime() : null,
+    ...pickSourceMetadata(first),
+  };
+}
+
+const SCENES_COLUMN_HELP =
+  "여러 장면을 저장하려면 Supabase SQL 편집기에서 supabase/project-scenes.sql 을 먼저 실행해 주세요.";
+
+function isMissingScenesColumn(error) {
+  const message = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`;
+  if (!/scenes/i.test(message)) return false;
+  return error?.code === "PGRST204" || error?.code === "42703" || /column|schema cache/i.test(message);
+}
+
+function rowFromProject(project, userId, { includeScenes = true } = {}) {
+  const scenes = normalizeScenes(project.scenes);
+  const first = scenes[0];
+  const row = {
+    id: project.id,
+    name: project.name,
+    image_url: first.imageUrl,
+    hotspots: first.hotspots,
+    background_type: first.backgroundType,
+    owner_id: userId,
+    source_provider: first.sourceProvider || null,
+    source_query: first.sourceQuery || null,
+    source_lat: first.sourceLat ?? null,
+    source_lng: first.sourceLng ?? null,
+    source_heading: first.sourceHeading ?? null,
+    source_pitch: first.sourcePitch ?? null,
+    source_fov: first.sourceFov ?? null,
+    source_pano_id: first.sourcePanoId || null,
+    source_image_url: first.sourceImageUrl || null,
+    source_copyright: first.sourceCopyright || null,
+  };
+  if (includeScenes) row.scenes = scenes;
+  return row;
+}
+
+// Writes with the scenes column first. If the database has not received
+// supabase/project-scenes.sql yet, single-scene projects fall back to the
+// legacy columns so nothing is lost; multi-scene projects refuse to save
+// silently truncated.
+async function runWithSceneFallback(sceneLists, run) {
+  const first = await run(true);
+  if (!first.error) return { ...first, scenesPersisted: true };
+  if (!isMissingScenesColumn(first.error)) throw new Error(first.error.message);
+  if (sceneLists.some((scenes) => scenes.length > 1)) throw new Error(SCENES_COLUMN_HELP);
+  const retry = await run(false);
+  if (retry.error) throw new Error(retry.error.message);
+  return { ...retry, scenesPersisted: false };
 }
 
 async function listProjects(userId) {
@@ -148,25 +303,11 @@ async function loadProject(id) {
 
 async function saveProject(project, userId) {
   if (!userId) throw new Error("Please log in before saving.");
-  const { error } = await supabase.from("projects").upsert({
-    id: project.id,
-    name: project.name,
-    image_url: project.imageUrl,
-    hotspots: normalizeHotspots(project.hotspots),
-    background_type: project.backgroundType,
-    owner_id: userId,
-    source_provider: project.sourceProvider || null,
-    source_query: project.sourceQuery || null,
-    source_lat: project.sourceLat ?? null,
-    source_lng: project.sourceLng ?? null,
-    source_heading: project.sourceHeading ?? null,
-    source_pitch: project.sourcePitch ?? null,
-    source_fov: project.sourceFov ?? null,
-    source_pano_id: project.sourcePanoId || null,
-    source_image_url: project.sourceImageUrl || null,
-    source_copyright: project.sourceCopyright || null,
-  });
-  if (error) throw new Error(error.message);
+  const scenes = normalizeScenes(project.scenes);
+  const result = await runWithSceneFallback([scenes], (includeScenes) =>
+    supabase.from("projects").upsert(rowFromProject({ ...project, scenes }, userId, { includeScenes })),
+  );
+  return { scenesPersisted: result.scenesPersisted };
 }
 
 async function deleteProjects(ids, userId) {
@@ -179,27 +320,21 @@ async function deleteProjects(ids, userId) {
 async function duplicateProjects(projects, userId) {
   if (!userId) throw new Error("Please log in before copying.");
   if (!projects.length) return [];
-  const rows = projects.map((project) => ({
+  const copies = projects.map((project) => ({
+    ...project,
     id: crypto.randomUUID(),
     name: `${project.name || "Untitled Project"} 복사본`,
-    image_url: project.imageUrl,
-    hotspots: normalizeHotspots(project.hotspots).map((hotspot) => ({ ...hotspot, id: crypto.randomUUID() })),
-    background_type: project.backgroundType,
-    owner_id: userId,
-    source_provider: project.sourceProvider || null,
-    source_query: project.sourceQuery || null,
-    source_lat: project.sourceLat ?? null,
-    source_lng: project.sourceLng ?? null,
-    source_heading: project.sourceHeading ?? null,
-    source_pitch: project.sourcePitch ?? null,
-    source_fov: project.sourceFov ?? null,
-    source_pano_id: project.sourcePanoId || null,
-    source_image_url: project.sourceImageUrl || null,
-    source_copyright: project.sourceCopyright || null,
+    scenes: cloneScenes(normalizeScenes(project.scenes)),
   }));
-  const { data, error } = await supabase.from("projects").insert(rows).select("*");
-  if (error) throw new Error(error.message);
-  return (data || []).map(projectFromRow);
+  const result = await runWithSceneFallback(
+    copies.map((project) => project.scenes),
+    (includeScenes) =>
+      supabase
+        .from("projects")
+        .insert(copies.map((project) => rowFromProject(project, userId, { includeScenes })))
+        .select("*"),
+  );
+  return (result.data || []).map(projectFromRow);
 }
 
 async function withProjectViewCounts(projects) {
@@ -862,7 +997,11 @@ function Home({ user, authLoading }) {
                 <img src={project.imageUrl || "/placeholder.svg"} alt="" />
                 <div>
                   <h3>{project.name}</h3>
-                  <p>{project.hotspots.length}개 핫스팟 · {project.backgroundType}</p>
+                  <p>
+                    {project.scenes.length > 1
+                      ? `장면 ${project.scenes.length}개 · 핫스팟 ${countHotspots(project.scenes)}개`
+                      : `${project.hotspots.length}개 핫스팟 · ${project.backgroundType}`}
+                  </p>
                   <p className="project-views">조회 {project.viewCount.toLocaleString("ko-KR")}회</p>
                   {!manageMode && (
                     <div className="row">
@@ -1482,9 +1621,23 @@ function HotspotModal({ hotspot, onClose }) {
   );
 }
 
-function Inspector({ hotspot, onChange, onDelete }) {
+function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDelete }) {
   const fileRef = useRef(null);
   if (!hotspot) return <div className="empty-panel">이미지를 클릭해 핫스팟을 만들거나 왼쪽 목록에서 선택하세요.</div>;
+  const otherScenes = scenes.filter((scene) => scene.id !== currentSceneId);
+
+  function selectContentType(type) {
+    if (type === "scene") {
+      onChange({
+        ...hotspot,
+        contentType: "scene",
+        icon: hotspot.icon === "info" ? "door" : hotspot.icon,
+        targetSceneId: hotspot.targetSceneId || (otherScenes.length === 1 ? otherScenes[0].id : null),
+      });
+      return;
+    }
+    onChange({ ...hotspot, contentType: type });
+  }
 
   async function addGalleryImages(files) {
     const urls = await Promise.all(Array.from(files).map(uploadFile));
@@ -1561,14 +1714,41 @@ function Inspector({ hotspot, onChange, onDelete }) {
           ["video", "영상"],
           ["embed", "임베드"],
           ["gallery", "갤러리"],
+          ["scene", "장면 이동"],
         ].map(([type, label]) => (
-          <button className={hotspot.contentType === type ? "active" : ""} key={type} onClick={() => onChange({ ...hotspot, contentType: type })}>
+          <button className={hotspot.contentType === type ? "active" : ""} key={type} onClick={() => selectContentType(type)}>
             {label}
           </button>
         ))}
       </div>
+      {hotspot.contentType === "scene" && (
+        <>
+          <label>이동할 장면</label>
+          <select
+            value={hotspot.targetSceneId || ""}
+            onChange={(event) => onChange({ ...hotspot, targetSceneId: event.target.value || null })}
+          >
+            <option value="">장면을 선택하세요</option>
+            {otherScenes.map((scene) => (
+              <option key={scene.id} value={scene.id}>
+                {scene.name}
+                {scene.imageUrl ? "" : " (배경 없음)"}
+              </option>
+            ))}
+          </select>
+          <p className="field-note">
+            {otherScenes.length
+              ? "학생이 이 핫스팟을 누르면 선택한 장면으로 이동합니다. 미리보기에서 바로 확인할 수 있어요."
+              : "왼쪽 장면 목록에서 장면을 추가하면 여기서 연결할 수 있습니다."}
+          </p>
+        </>
+      )}
       <label>제목</label>
-      <input value={hotspot.title} onChange={(event) => onChange({ ...hotspot, title: event.target.value })} placeholder="제목을 입력하세요" />
+      <input
+        value={hotspot.title}
+        onChange={(event) => onChange({ ...hotspot, title: event.target.value })}
+        placeholder={hotspot.contentType === "scene" ? "예: 교실 안으로 들어가기" : "제목을 입력하세요"}
+      />
       <label>설명</label>
       <textarea value={hotspot.description} onChange={(event) => onChange({ ...hotspot, description: event.target.value })} placeholder="학생에게 보여줄 설명을 입력하세요" />
       <label>링크 URL</label>
@@ -1608,6 +1788,98 @@ function Inspector({ hotspot, onChange, onDelete }) {
   );
 }
 
+const SCENE_TYPE_LABELS = {
+  image: "이미지",
+  "360": "360°",
+  glb: "3D",
+  [STREETVIEW_BACKGROUND_TYPE]: "Street View",
+};
+
+function SceneThumb({ scene }) {
+  const isPicture =
+    ["image", "360"].includes(scene.backgroundType) && scene.imageUrl && !scene.imageUrl.startsWith("google-streetview:");
+  if (isPicture) {
+    return (
+      <span className="scene-thumb">
+        <img src={scene.imageUrl} alt="" />
+      </span>
+    );
+  }
+  const Icon =
+    scene.backgroundType === "glb"
+      ? Box
+      : scene.backgroundType === "360"
+        ? Globe2
+        : scene.backgroundType === STREETVIEW_BACKGROUND_TYPE
+          ? MapPinned
+          : FileImage;
+  return (
+    <span className="scene-thumb">
+      <Icon size={20} />
+    </span>
+  );
+}
+
+function ScenePanel({ scenes, activeSceneId, canEdit, onSelect, onAdd, onRename, onMove, onRemove }) {
+  return (
+    <section className="scene-panel">
+      <div className="panel-heading">
+        <div>
+          <h3>
+            <Layers size={15} /> 장면
+          </h3>
+          <p>{canEdit ? "장면을 여러 개 만들고 핫스팟으로 이어 보세요." : `${scenes.length}개 장면`}</p>
+        </div>
+        {canEdit && (
+          <Button variant="secondary" onClick={onAdd} title="새 장면 추가">
+            <Plus size={15} /> 장면
+          </Button>
+        )}
+      </div>
+      <div className="scene-list">
+        {scenes.map((scene, index) => {
+          const active = scene.id === activeSceneId;
+          return (
+            <div className={`scene-row ${active ? "active" : ""}`} key={scene.id}>
+              <button className="scene-select" type="button" onClick={() => onSelect(scene.id)}>
+                <SceneThumb scene={scene} />
+                <span className="scene-meta">
+                  <strong>
+                    {index + 1}. {scene.name}
+                  </strong>
+                  <small>
+                    {SCENE_TYPE_LABELS[scene.backgroundType] || scene.backgroundType} · 핫스팟 {scene.hotspots.length}개
+                    {scene.imageUrl ? "" : " · 배경 없음"}
+                  </small>
+                </span>
+              </button>
+              {canEdit && active && (
+                <div className="scene-actions">
+                  <input
+                    aria-label="장면 이름"
+                    value={scene.name}
+                    onChange={(event) => onRename(scene.id, event.target.value)}
+                    placeholder="장면 이름"
+                  />
+                  <Button variant="ghost" title="위로" onClick={() => onMove(scene.id, -1)} disabled={index === 0}>
+                    <ChevronUp size={15} />
+                  </Button>
+                  <Button variant="ghost" title="아래로" onClick={() => onMove(scene.id, 1)} disabled={index === scenes.length - 1}>
+                    <ChevronDown size={15} />
+                  </Button>
+                  <Button variant="danger" title="장면 삭제" onClick={() => onRemove(scene.id)} disabled={scenes.length <= 1}>
+                    <Trash2 size={15} />
+                  </Button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function Editor({ user, authLoading, accessToken }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -1615,14 +1887,12 @@ function Editor({ user, authLoading, accessToken }) {
   const isExistingProject = Boolean(idParam);
   const [projectId, setProjectId] = useState(idParam || crypto.randomUUID());
   const [name, setName] = useState("Untitled Project");
-  const [imageUrl, setImageUrl] = useState(null);
   const [ownerId, setOwnerId] = useState(null);
-  const [hotspots, setHotspots] = useState([]);
+  const [scenes, setScenes] = useState(() => [createScene()]);
+  const [activeSceneId, setActiveSceneId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [activeContentId, setActiveContentId] = useState(null);
   const [editing, setEditing] = useState(true);
-  const [backgroundType, setBackgroundType] = useState("image");
-  const [sourceMetadata, setSourceMetadata] = useState(emptyStreetViewSource);
   const [streetViewImportOpen, setStreetViewImportOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -1630,12 +1900,34 @@ function Editor({ user, authLoading, accessToken }) {
   const [projectLoading, setProjectLoading] = useState(isExistingProject);
   const [projectMissing, setProjectMissing] = useState(false);
   const fileRef = useRef(null);
+  const lastIdParamRef = useRef(idParam);
   const mapsKey = useRuntimeGoogleMapsBrowserKey(accessToken);
+
+  const activeScene = scenes.find((scene) => scene.id === activeSceneId) || scenes[0];
+  const activeSceneRef = useRef(activeScene.id);
+  activeSceneRef.current = activeScene.id;
+  const { imageUrl, backgroundType, hotspots } = activeScene;
+  const sourceMetadata = useMemo(() => pickSourceMetadata(activeScene), [activeScene]);
+  const hasAnyBackground = scenes.some((scene) => scene.imageUrl);
 
   const canEdit = !!user && !authLoading && !projectLoading && (!isExistingProject || ownerId === user.id);
   const editingEnabled = canEdit && editing;
 
+  // Every background/hotspot edit is scoped to one scene. The scene id is
+  // captured at call time so async work (uploads) lands in the right scene.
+  const patchScene = useCallback((patch, sceneId = activeSceneRef.current) => {
+    setScenes((items) =>
+      items.map((scene) => (scene.id === sceneId ? { ...scene, ...(typeof patch === "function" ? patch(scene) : patch) } : scene)),
+    );
+  }, []);
+  const setHotspots = useCallback(
+    (updater) => patchScene((scene) => ({ hotspots: typeof updater === "function" ? updater(scene.hotspots) : updater })),
+    [patchScene],
+  );
+
   useEffect(() => {
+    const previousIdParam = lastIdParamRef.current;
+    lastIdParamRef.current = idParam;
     if (idParam) {
       setProjectId(idParam);
       setProjectLoading(true);
@@ -1647,33 +1939,95 @@ function Editor({ user, authLoading, accessToken }) {
           return;
         }
         setName(project.name);
-        setImageUrl(project.imageUrl);
         setOwnerId(project.ownerId);
-        setHotspots(project.hotspots);
-        setBackgroundType(project.backgroundType);
-        setSourceMetadata({
-          sourceProvider: project.sourceProvider,
-          sourceQuery: project.sourceQuery,
-          sourceLat: project.sourceLat,
-          sourceLng: project.sourceLng,
-          sourceHeading: project.sourceHeading,
-          sourcePitch: project.sourcePitch,
-          sourceFov: project.sourceFov,
-          sourcePanoId: project.sourcePanoId,
-          sourceImageUrl: project.sourceImageUrl,
-          sourceCopyright: project.sourceCopyright,
-        });
+        setScenes(project.scenes);
+        setActiveSceneId((current) => (project.scenes.some((scene) => scene.id === current) ? current : project.scenes[0].id));
         setProjectLoading(false);
       });
       return;
     }
+    if (previousIdParam) {
+      // Moved from an existing project to "new project": start clean.
+      setProjectId(crypto.randomUUID());
+      setName("Untitled Project");
+      setScenes([createScene()]);
+      setActiveSceneId(null);
+      setSelectedId(null);
+      setActiveContentId(null);
+    }
     setOwnerId(user?.id || null);
-    setSourceMetadata(emptyStreetViewSource());
     setProjectLoading(false);
     setProjectMissing(false);
   }, [idParam, user]);
 
   const selected = hotspots.find((hotspot) => hotspot.id === selectedId) || null;
+
+  function switchScene(id) {
+    if (!scenes.some((scene) => scene.id === id)) return;
+    setActiveSceneId(id);
+    setSelectedId(null);
+    setActiveContentId(null);
+  }
+
+  function addScene() {
+    const scene = createScene({}, scenes.length);
+    setScenes((items) => [...items, scene]);
+    setActiveSceneId(scene.id);
+    setSelectedId(null);
+    setActiveContentId(null);
+    setEditing(true);
+  }
+
+  function renameScene(id, sceneName) {
+    patchScene({ name: sceneName }, id);
+  }
+
+  function moveScene(id, direction) {
+    setScenes((items) => {
+      const index = items.findIndex((scene) => scene.id === id);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= items.length) return items;
+      const reordered = [...items];
+      const [scene] = reordered.splice(index, 1);
+      reordered.splice(next, 0, scene);
+      return reordered;
+    });
+  }
+
+  function removeScene(id) {
+    if (scenes.length <= 1) return;
+    const target = scenes.find((scene) => scene.id === id);
+    const hotspotCount = target?.hotspots.length || 0;
+    const message = hotspotCount
+      ? `"${target.name}" 장면과 그 안의 핫스팟 ${hotspotCount}개를 삭제할까요? 이 장면으로 이어지는 핫스팟은 연결이 해제됩니다.`
+      : `"${target?.name || "장면"}" 장면을 삭제할까요?`;
+    if (!window.confirm(message)) return;
+    const remaining = scenes.filter((scene) => scene.id !== id);
+    setScenes(
+      remaining.map((scene) => ({
+        ...scene,
+        hotspots: scene.hotspots.map((hotspot) => (hotspot.targetSceneId === id ? { ...hotspot, targetSceneId: null } : hotspot)),
+      })),
+    );
+    if (activeScene.id === id) {
+      setActiveSceneId(remaining[0].id);
+      setSelectedId(null);
+      setActiveContentId(null);
+    }
+  }
+
+  function openHotspotContent(id) {
+    const hotspot = hotspots.find((item) => item.id === id);
+    if (hotspot?.contentType === "scene") {
+      if (hotspot.targetSceneId && scenes.some((scene) => scene.id === hotspot.targetSceneId)) {
+        switchScene(hotspot.targetSceneId);
+      } else {
+        alert("이동할 장면이 아직 지정되지 않았습니다. 편집 모드에서 인스펙터의 '이동할 장면'을 선택해 주세요.");
+      }
+      return;
+    }
+    setActiveContentId(id);
+  }
 
   function addHotspot(x, y, worldX, worldY, worldZ, extra = {}) {
     const hotspot = {
@@ -1715,8 +2069,20 @@ function Editor({ user, authLoading, accessToken }) {
     setHotspots((items) => items.map((item) => (item.id === id ? { ...item, x, y } : item)));
   }
 
+  function resetSceneBackground(nextType) {
+    patchScene({
+      backgroundType: nextType,
+      imageUrl: null,
+      hotspots: [],
+      ...emptyStreetViewSource(),
+    });
+    setSelectedId(null);
+    setActiveContentId(null);
+  }
+
   async function handleUpload(file) {
     if (!file) return;
+    const sceneId = activeScene.id;
     const uploadBackgroundType = backgroundType === STREETVIEW_BACKGROUND_TYPE ? "image" : backgroundType;
     if (!canEdit) {
       alert("Log in with the owner account before uploading.");
@@ -1741,10 +2107,15 @@ function Editor({ user, authLoading, accessToken }) {
     setUploading(true);
     try {
       const url = await uploadFile(file);
-      setImageUrl(url);
-      setBackgroundType(uploadBackgroundType);
-      setSourceMetadata(emptyStreetViewSource());
-      setHotspots([]);
+      patchScene(
+        {
+          imageUrl: url,
+          backgroundType: uploadBackgroundType,
+          hotspots: [],
+          ...emptyStreetViewSource(),
+        },
+        sceneId,
+      );
       setSelectedId(null);
       setEditing(true);
     } catch (error) {
@@ -1755,13 +2126,23 @@ function Editor({ user, authLoading, accessToken }) {
   }
 
   async function handleSave({ silent = false } = {}) {
-    if (!canEdit || !imageUrl || !user || saving) return false;
+    if (!canEdit || !hasAnyBackground || !user || saving) return false;
+    if (!scenes[0].imageUrl) {
+      alert("첫 번째 장면에 배경을 넣어야 저장할 수 있습니다. 학생은 첫 장면부터 보게 됩니다.");
+      return false;
+    }
     setSaving(true);
     try {
-      await saveProject({ id: projectId, name, imageUrl, hotspots, backgroundType, ...sourceMetadata }, user.id);
+      const result = await saveProject({ id: projectId, name, scenes }, user.id);
       setOwnerId(user.id);
       if (!idParam) navigate(`/editor?id=${projectId}`, { replace: true });
-      if (!silent) alert("프로젝트를 저장했습니다.");
+      if (!silent) {
+        alert(
+          result.scenesPersisted
+            ? "프로젝트를 저장했습니다."
+            : `프로젝트를 저장했습니다. (장면 정보는 아직 저장되지 않습니다. ${SCENES_COLUMN_HELP})`,
+        );
+      }
       return true;
     } catch (error) {
       alert(error instanceof Error ? error.message : "저장에 실패했습니다.");
@@ -1772,28 +2153,19 @@ function Editor({ user, authLoading, accessToken }) {
   }
 
   async function copyViewLink() {
-    if (!imageUrl) return;
+    if (!hasAnyBackground) return;
     const saved = await handleSave({ silent: true });
     if (!saved) return;
     setShareUrl(`${window.location.origin}/view/${projectId}`);
   }
 
   function applyStreetViewBackground(nextSource) {
-    setBackgroundType(nextSource.backgroundType || "image");
-    setImageUrl(nextSource.imageUrl);
-    setSourceMetadata({
-      sourceProvider: nextSource.sourceProvider,
-      sourceQuery: nextSource.sourceQuery,
-      sourceLat: nextSource.sourceLat,
-      sourceLng: nextSource.sourceLng,
-      sourceHeading: nextSource.sourceHeading,
-      sourcePitch: nextSource.sourcePitch,
-      sourceFov: nextSource.sourceFov,
-      sourcePanoId: nextSource.sourcePanoId,
-      sourceImageUrl: nextSource.sourceImageUrl,
-      sourceCopyright: nextSource.sourceCopyright,
+    patchScene({
+      backgroundType: nextSource.backgroundType || "image",
+      imageUrl: nextSource.imageUrl,
+      hotspots: [],
+      ...pickSourceMetadata(nextSource),
     });
-    setHotspots([]);
     setSelectedId(null);
     setActiveContentId(null);
     setEditing(true);
@@ -1804,11 +2176,12 @@ function Editor({ user, authLoading, accessToken }) {
     if (!imageUrl) return null;
     const projectSource = { imageUrl, backgroundType, ...sourceMetadata };
     const props = {
+      key: activeScene.id,
       hotspots,
       selectedId,
       editing: editingEnabled,
       onAdd: addHotspot,
-      onSelect: (id) => (editingEnabled ? setSelectedId(id) : setActiveContentId(id)),
+      onSelect: (id) => (editingEnabled ? setSelectedId(id) : openHotspotContent(id)),
       onMove: moveHotspot,
     };
     if (backgroundType === "360") return <PanoramaStage imageUrl={imageUrl} {...props} />;
@@ -1817,10 +2190,12 @@ function Editor({ user, authLoading, accessToken }) {
       return <GoogleStreetViewStage apiKey={mapsKey.apiKey} project={projectSource} {...props} />;
     }
     return <ImageStage imageUrl={imageUrl} {...props} />;
-  }, [backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, selectedId, sourceMetadata]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScene.id, backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, scenes, selectedId, sourceMetadata]);
 
   const activeContent = hotspots.find((hotspot) => hotspot.id === activeContentId);
   const uploadGuidance = UPLOAD_GUIDANCE[backgroundType] || UPLOAD_GUIDANCE.image;
+  const sceneNameById = (id) => scenes.find((scene) => scene.id === id)?.name || "";
 
   return (
     <main className="editor-page">
@@ -1850,18 +2225,14 @@ function Editor({ user, authLoading, accessToken }) {
                     setStreetViewImportOpen(true);
                     return;
                   }
-                  setBackgroundType(value);
-                  setImageUrl(null);
-                  setSourceMetadata(emptyStreetViewSource());
-                  setHotspots([]);
-                  setSelectedId(null);
+                  resetSceneBackground(value);
                 }}
               >
                 <Icon size={15} /> {label}
               </button>
             ))}
           </div>
-          {imageUrl && canEdit && (
+          {hasAnyBackground && canEdit && (
             <div className="segmented compact">
               <button className={editing ? "active" : ""} onClick={() => setEditing(true)}>
                 편집
@@ -1871,7 +2242,7 @@ function Editor({ user, authLoading, accessToken }) {
               </button>
             </div>
           )}
-          {imageUrl && canEdit && (
+          {hasAnyBackground && canEdit && (
             <>
               <Button variant="secondary" onClick={handleSave} disabled={saving}><Save size={16} /> {saving ? "저장 중..." : "저장"}</Button>
               <Button variant="secondary" onClick={copyViewLink} disabled={saving}><Share2 size={16} /> 공유</Button>
@@ -1902,16 +2273,37 @@ function Editor({ user, authLoading, accessToken }) {
       {user && ownerId && ownerId !== user.id && <div className="readonly">다른 계정의 프로젝트라 보기만 가능합니다.</div>}
       <div className="editor-grid">
         <aside className="sidebar">
+          <ScenePanel
+            scenes={scenes}
+            activeSceneId={activeScene.id}
+            canEdit={canEdit}
+            onSelect={switchScene}
+            onAdd={addScene}
+            onRename={renameScene}
+            onMove={moveScene}
+            onRemove={removeScene}
+          />
           <h3>핫스팟</h3>
-          <p>{editingEnabled ? "이미지를 클릭해 새 핫스팟을 찍고, 목록에서 선택해 편집하세요." : "이 프로젝트는 보기 전용입니다."}</p>
+          <p>
+            {editingEnabled
+              ? `"${activeScene.name}" 장면의 핫스팟입니다. 배경을 클릭해 새 핫스팟을 찍고, 목록에서 선택해 편집하세요.`
+              : `"${activeScene.name}" 장면의 핫스팟입니다.`}
+          </p>
           {hotspots.length ? (
             hotspots.map((hotspot, index) => (
               <button
                 className={`hotspot-row ${selectedId === hotspot.id ? "active" : ""}`}
                 key={hotspot.id}
-                onClick={() => (canEdit ? setSelectedId(hotspot.id) : setActiveContentId(hotspot.id))}
+                onClick={() => (editingEnabled ? setSelectedId(hotspot.id) : openHotspotContent(hotspot.id))}
               >
-                <span>#{index + 1} {hotspot.title || "제목 없는 핫스팟"}</span>
+                <span>
+                  #{index + 1} {hotspot.title || "제목 없는 핫스팟"}
+                  {hotspot.contentType === "scene" && (
+                    <small className="hotspot-scene-link">
+                      → {hotspot.targetSceneId ? sceneNameById(hotspot.targetSceneId) || "삭제된 장면" : "장면 미지정"}
+                    </small>
+                  )}
+                </span>
                 <i style={{ backgroundColor: hotspot.markerColor || defaultColor }} />
               </button>
             ))
@@ -1922,6 +2314,11 @@ function Editor({ user, authLoading, accessToken }) {
         <section className="canvas-area">
           {imageUrl ? (
             <div className="stage-stack">
+              {scenes.length > 1 && (
+                <div className="scene-badge">
+                  <Layers size={14} /> {scenes.findIndex((scene) => scene.id === activeScene.id) + 1} / {scenes.length} · {activeScene.name}
+                </div>
+              )}
               {stage}
               <SourceAttribution project={sourceMetadata} />
               {mapsKey.error && backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
@@ -1936,7 +2333,7 @@ function Editor({ user, authLoading, accessToken }) {
               <strong>{uploadGuidance.title}</strong>
               <span>
                 {canEdit
-                  ? uploadGuidance.description
+                  ? `"${activeScene.name}" 장면 · ${uploadGuidance.description}`
                   : "이 링크에서는 편집하거나 업로드할 수 없습니다."}
               </span>
               {canEdit && (
@@ -1956,7 +2353,13 @@ function Editor({ user, authLoading, accessToken }) {
           <h3>인스펙터</h3>
           <p>학생이 눌렀을 때 볼 내용을 이곳에서 편집합니다.</p>
           {canEdit ? (
-            <Inspector hotspot={selected} onChange={updateHotspot} onDelete={removeHotspot} />
+            <Inspector
+              hotspot={selected}
+              scenes={scenes}
+              currentSceneId={activeScene.id}
+              onChange={updateHotspot}
+              onDelete={removeHotspot}
+            />
           ) : (
             <div className="empty-panel">소유자 계정으로 로그인하면 편집할 수 있습니다.</div>
           )}
@@ -1982,6 +2385,7 @@ function ViewProject() {
   const [project, setProject] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [activeId, setActiveId] = useState(null);
+  const [activeSceneId, setActiveSceneId] = useState(null);
   const [shareUrl, setShareUrl] = useState("");
   const mapsKey = useRuntimeGoogleMapsBrowserKey();
 
@@ -2012,14 +2416,34 @@ function ViewProject() {
   }
   if (!project) return <main className="centered muted">불러오는 중...</main>;
 
-  const active = project.hotspots.find((hotspot) => hotspot.id === activeId);
+  const scenes = project.scenes;
+  const scene = scenes.find((item) => item.id === activeSceneId) || scenes[0];
+  const sceneIndex = scenes.findIndex((item) => item.id === scene.id);
+  const active = scene.hotspots.find((hotspot) => hotspot.id === activeId);
   const viewShareUrl = `${window.location.origin}/view/${project.id}`;
+
+  function goToScene(nextId) {
+    if (!scenes.some((item) => item.id === nextId)) return;
+    setActiveId(null);
+    setActiveSceneId(nextId);
+  }
+
+  function handleHotspotSelect(hotspotId) {
+    const hotspot = scene.hotspots.find((item) => item.id === hotspotId);
+    if (hotspot?.contentType === "scene") {
+      if (hotspot.targetSceneId) goToScene(hotspot.targetSceneId);
+      return;
+    }
+    setActiveId(hotspotId);
+  }
+
   const props = {
-    hotspots: project.hotspots,
+    key: scene.id,
+    hotspots: scene.hotspots,
     editing: false,
     selectedId: null,
     onAdd: () => {},
-    onSelect: setActiveId,
+    onSelect: handleHotspotSelect,
     onMove: () => {},
   };
 
@@ -2029,8 +2453,18 @@ function ViewProject() {
         <div className="row">
           <Sparkles size={21} />
           <strong>{project.name}</strong>
+          {scenes.length > 1 && (
+            <span className="viewer-scene-label">
+              {sceneIndex + 1} / {scenes.length} · {scene.name}
+            </span>
+          )}
         </div>
         <div className="viewer-actions">
+          {scenes.length > 1 && sceneIndex > 0 && (
+            <Button variant="ghost" onClick={() => goToScene(scenes[0].id)}>
+              <Layers size={16} /> 첫 장면
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => setShareUrl(viewShareUrl)}>
             <Share2 size={16} /> 공유
           </Button>
@@ -2041,17 +2475,34 @@ function ViewProject() {
       </header>
       <section className="view-canvas">
         <div className="stage-stack">
-          {project.backgroundType === "360" ? (
-            <PanoramaStage imageUrl={project.imageUrl} {...props} />
-          ) : project.backgroundType === "glb" ? (
-            <ModelStage modelUrl={project.imageUrl} {...props} />
-          ) : project.backgroundType === STREETVIEW_BACKGROUND_TYPE ? (
-            <GoogleStreetViewStage apiKey={mapsKey.apiKey} project={project} {...props} />
+          {!scene.imageUrl ? (
+            <div className="stage empty-scene">이 장면에는 아직 배경이 없습니다.</div>
+          ) : scene.backgroundType === "360" ? (
+            <PanoramaStage imageUrl={scene.imageUrl} {...props} />
+          ) : scene.backgroundType === "glb" ? (
+            <ModelStage modelUrl={scene.imageUrl} {...props} />
+          ) : scene.backgroundType === STREETVIEW_BACKGROUND_TYPE ? (
+            <GoogleStreetViewStage apiKey={mapsKey.apiKey} project={scene} {...props} />
           ) : (
-            <ImageStage imageUrl={project.imageUrl} {...props} />
+            <ImageStage imageUrl={scene.imageUrl} {...props} />
           )}
-          <SourceAttribution project={project} />
-          {mapsKey.error && project.backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
+          <SourceAttribution project={scene} />
+          {mapsKey.error && scene.backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
+          {scenes.length > 1 && (
+            <nav className="scene-nav" aria-label="장면 이동">
+              {scenes.map((item, index) => (
+                <button
+                  className={item.id === scene.id ? "active" : ""}
+                  key={item.id}
+                  type="button"
+                  onClick={() => goToScene(item.id)}
+                  aria-current={item.id === scene.id ? "page" : undefined}
+                >
+                  {index + 1}. {item.name}
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
       </section>
       {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
