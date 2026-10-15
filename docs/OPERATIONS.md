@@ -170,3 +170,23 @@ Behaviour rules:
   no scene is lost.
 - Scene 1 must have a background before saving. Students start on scene 1.
 - Deleting a scene clears every hotspot link that pointed at it.
+
+## Keeping Supabase awake (free plan auto-pause)
+
+Supabase free projects pause after about a week without database activity. When
+paused, saved projects, login, and shared links stop working.
+
+Two automatic keepalives prevent this:
+
+1. **Vercel Cron (main)**: `vercel.json` calls `/api/keepalive` every day at
+   21:00 UTC (06:00 KST). It reads one row from `projects`. It only runs on the
+   production deployment, so it starts after this change is merged to `main`.
+2. **GitHub Actions (backup)**: `.github/workflows/supabase-keepalive.yml` reads
+   one row every 3 days. If it fails, GitHub emails the repo owner — that usually
+   means the project is paused and needs a restore in the Supabase dashboard.
+
+Manual check: open `https://dist-flax-omega-33.vercel.app/api/keepalive`.
+`{"ok":true,...}` means Supabase is awake.
+
+Optional: set `CRON_SECRET` in Vercel environment variables so only Vercel Cron can
+call `/api/keepalive` (the manual check above then returns 401).
