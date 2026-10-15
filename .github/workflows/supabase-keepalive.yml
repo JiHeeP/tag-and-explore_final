@@ -1,0 +1,28 @@
+# Backup for the Vercel cron in vercel.json: keeps the free-plan Supabase project
+# from pausing. Runs every 3 days and can also be started by hand from the Actions tab.
+name: Supabase keepalive
+
+on:
+  schedule:
+    - cron: "17 22 */3 * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read one project row
+        env:
+          SUPABASE_URL: https://bnpxshdnckyubwgkwmpx.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_b9uy6XuIZHKou9z89suVLA_EkOgnGtO
+        run: |
+          status=$(curl -sS -o body.txt -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/projects?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "HTTP $status"
+          head -c 300 body.txt; echo
+          if [ "$status" != "200" ]; then
+            echo "::error::Supabase did not respond normally. It may be paused - open the Supabase dashboard and restore the project."
+            exit 1
+          fi
