@@ -4,6 +4,8 @@ Recovered deployment and editable source for the Tag and Explore app.
 
 ## Deployment
 
+Production URL: https://tagandexplore.vercel.app (the old `dist-flax-omega-33.vercel.app` address still works).
+
 The repository root is configured as a static Vercel deployment. It serves the recovered Vercel bundle from `recovered-deploy/` so the site can be restored without rebuilding the original app.
 
 `vercel.json` rewrites React routes such as `/editor` and `/view/:id` to `index.html`.

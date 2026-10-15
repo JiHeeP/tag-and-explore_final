@@ -185,7 +185,7 @@ Two automatic keepalives prevent this:
    one row every 3 days. If it fails, GitHub emails the repo owner — that usually
    means the project is paused and needs a restore in the Supabase dashboard.
 
-Manual check: open `https://dist-flax-omega-33.vercel.app/api/keepalive`.
+Manual check: open `https://tagandexplore.vercel.app/api/keepalive`.
 `{"ok":true,...}` means Supabase is awake.
 
 Optional: set `CRON_SECRET` in Vercel environment variables so only Vercel Cron can
