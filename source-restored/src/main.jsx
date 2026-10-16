@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/react";
 import {
   ArrowLeft,
   Box,
+  Check,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -17,11 +18,14 @@ import {
   FileImage,
   Globe2,
   Info,
+  KeyRound,
   Layers,
   Link as LinkIcon,
+  Lock,
   LogOut,
   MapPinned,
   Plus,
+  RotateCcw,
   Save,
   Share2,
   Sparkles,
@@ -99,6 +103,139 @@ function normalizeHotspots(hotspots = []) {
       mediaItems,
     };
   });
+}
+
+// 열쇠(문제) 핫스팟: 같은 장면의 열쇠를 모두 맞혀야 그 장면의 문(장면 이동) 핫스팟이 열린다.
+// 문제 유형은 단답형(type "short", answers[])과 객관식(type "choice", choices[] + correctIndex).
+// 정답이 정해지지 않은 문제는 학생이 풀 수 없으므로 열쇠로 치지 않는다.
+function normalizeQuizAnswer(value) {
+  return String(value ?? "")
+    .normalize("NFC")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function splitQuizAnswers(text) {
+  return String(text || "")
+    .split(/[,，]/)
+    .map((answer) => answer.trim())
+    .filter(Boolean);
+}
+
+function quizAnswers(quiz) {
+  return (Array.isArray(quiz?.answers) ? quiz.answers : []).map(normalizeQuizAnswer).filter(Boolean);
+}
+
+function isCorrectQuizAnswer(quiz, input) {
+  const guess = normalizeQuizAnswer(input);
+  return Boolean(guess) && quizAnswers(quiz).includes(guess);
+}
+
+function quizType(quiz) {
+  return quiz?.type === "choice" ? "choice" : "short";
+}
+
+// 빈 보기는 건너뛰되, correctIndex가 원래 위치를 가리키도록 index를 함께 둔다.
+function quizChoiceOptions(quiz) {
+  return (Array.isArray(quiz?.choices) ? quiz.choices : [])
+    .map((text, index) => ({ text: String(text ?? "").trim(), index }))
+    .filter((option) => option.text);
+}
+
+function isQuizReady(quiz) {
+  if (quizType(quiz) === "choice") {
+    const options = quizChoiceOptions(quiz);
+    return options.length >= 2 && options.some((option) => option.index === quiz.correctIndex);
+  }
+  return quizAnswers(quiz).length > 0;
+}
+
+function isQuizHotspot(hotspot) {
+  return hotspot?.contentType !== "scene" && hotspot?.quiz?.enabled === true && isQuizReady(hotspot.quiz);
+}
+
+function sceneKeyHotspots(scene) {
+  return (scene?.hotspots || []).filter(isQuizHotspot);
+}
+
+// 순서 진행(장면 바로가기 숨김) 설정은 첫 장면의 settings.sequential에 둔다.
+// 정해 두지 않았으면 열쇠 핫스팟이 하나라도 있을 때 켜진다.
+function isSequentialProject(scenes = []) {
+  const setting = scenes.find((scene) => typeof scene.settings?.sequential === "boolean")?.settings.sequential;
+  if (typeof setting === "boolean") return setting;
+  return scenes.some((scene) => sceneKeyHotspots(scene).length > 0);
+}
+
+function sceneGate(scene, isSolved) {
+  const keys = sceneKeyHotspots(scene);
+  const solved = keys.filter((hotspot) => isSolved(scene.id, hotspot.id)).length;
+  return { total: keys.length, solved, open: solved >= keys.length };
+}
+
+// 화면 표시용 lockState만 덧붙인 사본. 저장 데이터에는 쓰지 않는다.
+function decorateHotspotsWithLocks(scene, isSolved) {
+  const gate = sceneGate(scene, isSolved);
+  return scene.hotspots.map((hotspot) => {
+    if (isQuizHotspot(hotspot)) return { ...hotspot, lockState: isSolved(scene.id, hotspot.id) ? "solved" : "key" };
+    if (hotspot.contentType === "scene" && gate.total > 0) return { ...hotspot, lockState: gate.open ? "open" : "locked" };
+    return hotspot;
+  });
+}
+
+function quizStorageKey(projectId, sceneId, hotspotId) {
+  return `${projectId}:${sceneId}:${hotspotId}`;
+}
+
+function readSolvedQuizzes(projectId) {
+  const solved = {};
+  if (!projectId) return solved;
+  try {
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(`${projectId}:`) && sessionStorage.getItem(key) === "solved") solved[key] = true;
+    }
+  } catch {
+    // sessionStorage를 쓸 수 없으면 메모리 상태로만 동작한다.
+  }
+  return solved;
+}
+
+// 풀이 상태는 탭 단위(sessionStorage)로 유지: 새로고침해도 남고 탭을 닫으면 초기화된다.
+function useQuizProgress(projectId) {
+  const [solved, setSolved] = useState(() => readSolvedQuizzes(projectId));
+
+  useEffect(() => {
+    setSolved(readSolvedQuizzes(projectId));
+  }, [projectId]);
+
+  const isSolved = useCallback(
+    (sceneId, hotspotId) => Boolean(solved[quizStorageKey(projectId, sceneId, hotspotId)]),
+    [projectId, solved],
+  );
+
+  const markSolved = useCallback(
+    (sceneId, hotspotId) => {
+      const key = quizStorageKey(projectId, sceneId, hotspotId);
+      try {
+        sessionStorage.setItem(key, "solved");
+      } catch {
+        // 메모리 상태만 갱신한다.
+      }
+      setSolved((current) => ({ ...current, [key]: true }));
+    },
+    [projectId],
+  );
+
+  const reset = useCallback(() => {
+    try {
+      Object.keys(readSolvedQuizzes(projectId)).forEach((key) => sessionStorage.removeItem(key));
+    } catch {
+      // 메모리 상태만 비운다.
+    }
+    setSolved({});
+  }, [projectId]);
+
+  return { isSolved, markSolved, reset };
 }
 
 const SOURCE_FIELDS = [
@@ -1028,16 +1165,27 @@ function Home({ user, authLoading }) {
 }
 
 function HotspotMarker({ hotspot, selected, onClick, style, ...props }) {
-  const Icon = icons.find((item) => item.value === hotspot.icon)?.icon || Info;
+  const { lockState } = hotspot;
+  const isNumber = hotspot.markerMode === "number";
+  const Icon =
+    lockState === "locked" ? Lock : lockState === "open" ? DoorOpen : icons.find((item) => item.value === hotspot.icon)?.icon || Info;
+  const BadgeIcon =
+    lockState === "solved" ? Check : lockState === "key" ? KeyRound : lockState === "locked" && isNumber ? Lock : null;
+  const title = hotspot.title || "Hotspot";
   return (
     <button
-      className={`marker ${selected ? "selected" : ""}`}
+      className={`marker ${selected ? "selected" : ""} ${lockState ? `marker-${lockState}` : ""}`}
       onClick={onClick}
       style={{ "--marker": hotspot.markerColor || defaultColor, ...style }}
-      title={hotspot.title || "Hotspot"}
+      title={lockState === "locked" ? `${title} (잠김)` : lockState === "solved" ? `${title} (해결)` : title}
       {...props}
     >
-      {hotspot.markerMode === "number" ? hotspot.markerNumber : <Icon size={18} />}
+      {isNumber ? hotspot.markerNumber : <Icon size={18} />}
+      {BadgeIcon && (
+        <span className="marker-badge" aria-hidden="true">
+          <BadgeIcon size={11} strokeWidth={3} />
+        </span>
+      )}
     </button>
   );
 }
@@ -1046,6 +1194,9 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
   const ref = useRef(null);
   const imageRef = useRef(null);
   const [draggingId, setDraggingId] = useState(null);
+  // 틀이 이미지 크기에 맞춰지므로, 이미지를 받기 전에는 자리만 잡아 둔다.
+  const [loadedUrl, setLoadedUrl] = useState(null);
+  const imageReady = loadedUrl === imageUrl;
 
   function positionFromPoint(clientX, clientY) {
     const target = imageRef.current || ref.current;
@@ -1084,9 +1235,16 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
   }
 
   return (
-    <div className="stage image-stage" ref={ref} onClick={handleClick}>
+    <div className={`stage image-stage ${imageReady ? "" : "is-loading"}`} ref={ref} onClick={handleClick}>
       {editing && <div className="stage-hint">이미지를 클릭해 핫스팟 추가</div>}
-      <img ref={imageRef} src={imageUrl} alt="" draggable={false} />
+      <img
+        ref={imageRef}
+        src={imageUrl}
+        alt=""
+        draggable={false}
+        onLoad={() => setLoadedUrl(imageUrl)}
+        onError={() => setLoadedUrl(imageUrl)}
+      />
       {hotspots.map((hotspot) => (
         <HotspotMarker
           key={hotspot.id}
@@ -1107,11 +1265,314 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
   );
 }
 
-function PanoramaStage(props) {
+// 360° 파노라마: 저장 좌표 x,y(%)는 equirectangular 이미지 위의 위치 그대로다.
+// x는 가로 0~360°, y는 위(0%)에서 아래(100%)까지. 반전된 구(three.js SphereGeometry)의
+// UV와 같은 규칙이라 텍스처와 핫스팟이 같은 지점에 놓인다.
+function panoramaDirection(x, y) {
+  const phi = (x / 100) * Math.PI * 2;
+  const theta = (y / 100) * Math.PI;
+  return new THREE.Vector3(Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta));
+}
+
+function panoramaPercent(direction) {
+  const unit = direction.clone().normalize();
+  let phi = Math.atan2(unit.z, unit.x);
+  if (phi < 0) phi += Math.PI * 2;
+  const theta = Math.acos(Math.max(-1, Math.min(1, unit.y)));
+  return { x: (phi / (Math.PI * 2)) * 100, y: (theta / Math.PI) * 100 };
+}
+
+function withCacheBust(url) {
+  return `${url}${url.includes("?") ? "&" : "?"}pano=1`;
+}
+
+// WebGL 텍스처는 CORS가 필요하다. 먼저 우리 사이트의 /api/pano-image를 거쳐 받고(같은 출처라 CORS 불필요),
+// 안 되면 원본 주소, 캐시를 피한 원본 주소 순서로 시도한다.
+function panoramaImageCandidates(url) {
+  const candidates = [];
+  if (/^https:\/\//i.test(url)) candidates.push(`/api/pano-image?url=${encodeURIComponent(url)}`);
+  candidates.push(url, withCacheBust(url));
+  return candidates;
+}
+
+const PANORAMA_MIN_FOV = 30;
+const PANORAMA_MAX_FOV = 90;
+
+function PanoramaStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, onMove }) {
+  const stageRef = useRef(null);
+  const mountRef = useRef(null);
+  const cameraRef = useRef(null);
+  const viewRef = useRef({ lon: Math.PI, lat: 0, fov: 75 });
+  const hotspotsRef = useRef(hotspots);
+  const pointersRef = useRef(new Map());
+  const gestureRef = useRef(null);
+  const markerPositionsRef = useRef({});
+  const [markerPositions, setMarkerPositions] = useState({});
+  const [status, setStatus] = useState("loading");
+  const [draggingId, setDraggingId] = useState(null);
+
+  useEffect(() => {
+    hotspotsRef.current = hotspots;
+  }, [hotspots]);
+
+  function percentFromClientPoint(clientX, clientY) {
+    const camera = cameraRef.current;
+    const mount = mountRef.current;
+    if (!camera || !mount) return null;
+    const rect = mount.getBoundingClientRect();
+    const pointer = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -(((clientY - rect.top) / rect.height) * 2 - 1));
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    return panoramaPercent(raycaster.ray.direction);
+  }
+
+  useEffect(() => {
+    setStatus("loading");
+    setMarkerPositions({});
+    markerPositionsRef.current = {};
+    const mount = mountRef.current;
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    } catch {
+      setStatus("error");
+      return undefined;
+    }
+    const view = viewRef.current;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(view.fov, (mount.clientWidth || 800) / (mount.clientHeight || 480), 0.1, 1100);
+    cameraRef.current = camera;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(mount.clientWidth || 800, mount.clientHeight || 480);
+    mount.appendChild(renderer.domElement);
+
+    const geometry = new THREE.SphereGeometry(500, 64, 40);
+    geometry.scale(-1, 1, 1);
+    const material = new THREE.MeshBasicMaterial({ color: 0xf4f5f7 });
+    scene.add(new THREE.Mesh(geometry, material));
+
+    let disposed = false;
+    let texture = null;
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
+    const applyTexture = (loaded) => {
+      if (disposed) {
+        loaded.dispose();
+        return;
+      }
+      texture = loaded;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      material.map = texture;
+      material.color.set(0xffffff);
+      material.needsUpdate = true;
+      setStatus("ready");
+    };
+    const candidates = panoramaImageCandidates(imageUrl);
+    const tryLoad = (index) => {
+      if (disposed) return;
+      if (index >= candidates.length) {
+        setStatus("error");
+        return;
+      }
+      loader.load(candidates[index], applyTexture, undefined, () => tryLoad(index + 1));
+    };
+    tryLoad(0);
+
+    const forward = new THREE.Vector3();
+    const target = new THREE.Vector3();
+    const projectHotspots = () => {
+      camera.getWorldDirection(forward);
+      const next = {};
+      hotspotsRef.current.forEach((hotspot) => {
+        const direction = panoramaDirection(hotspot.x, hotspot.y);
+        const projected = direction.clone().multiplyScalar(100).project(camera);
+        const x = ((projected.x + 1) / 2) * 100;
+        const y = ((1 - projected.y) / 2) * 100;
+        const hidden = direction.dot(forward) <= 0.05 || x < -5 || x > 105 || y < -5 || y > 105;
+        next[hotspot.id] = { x, y, hidden };
+      });
+      const previous = markerPositionsRef.current;
+      const keys = Object.keys(next);
+      const changed =
+        keys.length !== Object.keys(previous).length ||
+        keys.some((id) => {
+          const before = previous[id];
+          const after = next[id];
+          return !before || before.hidden !== after.hidden || Math.abs(before.x - after.x) > 0.05 || Math.abs(before.y - after.y) > 0.05;
+        });
+      if (changed) {
+        markerPositionsRef.current = next;
+        setMarkerPositions(next);
+      }
+    };
+
+    let frame;
+    const animate = () => {
+      frame = requestAnimationFrame(animate);
+      const maxLat = Math.PI / 2 - 0.01;
+      view.lat = Math.max(-maxLat, Math.min(maxLat, view.lat));
+      if (camera.fov !== view.fov) {
+        camera.fov = view.fov;
+        camera.updateProjectionMatrix();
+      }
+      target.set(Math.cos(view.lat) * Math.cos(view.lon), Math.sin(view.lat), Math.cos(view.lat) * Math.sin(view.lon));
+      camera.lookAt(target);
+      renderer.render(scene, camera);
+      projectHotspots();
+    };
+    animate();
+
+    const handleWheel = (event) => {
+      event.preventDefault();
+      view.fov = Math.max(PANORAMA_MIN_FOV, Math.min(PANORAMA_MAX_FOV, view.fov + event.deltaY * 0.05));
+    };
+    mount.addEventListener("wheel", handleWheel, { passive: false });
+
+    const resizeObserver = new ResizeObserver(() => {
+      const width = mount.clientWidth || 800;
+      const height = mount.clientHeight || 480;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    });
+    resizeObserver.observe(mount);
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mount.removeEventListener("wheel", handleWheel);
+      texture?.dispose();
+      geometry.dispose();
+      material.dispose();
+      renderer.dispose();
+      mount.replaceChildren();
+      cameraRef.current = null;
+    };
+  }, [imageUrl]);
+
+  // 배경 드래그: 둘러보기 / 두 손가락: 확대 / 짧게 클릭(편집 중): 핫스팟 추가
+  function handlePointerDown(event) {
+    if (event.target.closest?.(".marker")) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const points = [...pointersRef.current.values()];
+    if (points.length === 2) {
+      gestureRef.current = { pinch: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y), fov: viewRef.current.fov, moved: true };
+    } else {
+      gestureRef.current = { startX: event.clientX, startY: event.clientY, moved: false };
+    }
+  }
+
+  function handlePointerMove(event) {
+    const previous = pointersRef.current.get(event.pointerId);
+    const gesture = gestureRef.current;
+    if (!previous || !gesture) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const view = viewRef.current;
+    const points = [...pointersRef.current.values()];
+    if (points.length >= 2 && gesture.pinch) {
+      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1;
+      view.fov = Math.max(PANORAMA_MIN_FOV, Math.min(PANORAMA_MAX_FOV, (gesture.fov * gesture.pinch) / distance));
+      return;
+    }
+    if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 5) gesture.moved = true;
+    const height = mountRef.current?.clientHeight || 480;
+    const radiansPerPixel = THREE.MathUtils.degToRad(view.fov) / height;
+    view.lon -= (event.clientX - previous.x) * radiansPerPixel;
+    view.lat += (event.clientY - previous.y) * radiansPerPixel;
+  }
+
+  function handlePointerUp(event) {
+    const gesture = gestureRef.current;
+    const wasTracked = pointersRef.current.delete(event.pointerId);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (pointersRef.current.size > 0) {
+      const [remaining] = pointersRef.current.values();
+      gestureRef.current = { startX: remaining.x, startY: remaining.y, moved: true };
+      return;
+    }
+    gestureRef.current = null;
+    if (!wasTracked || !gesture || gesture.moved || !editing || status !== "ready") return;
+    const point = percentFromClientPoint(event.clientX, event.clientY);
+    if (point) onAdd(point.x, point.y);
+  }
+
+  function handlePointerCancel(event) {
+    pointersRef.current.delete(event.pointerId);
+    gestureRef.current = null;
+  }
+
+  function handleMarkerPointerDown(event, id) {
+    event.stopPropagation();
+    if (!editing) return;
+    setDraggingId(id);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleMarkerPointerMove(event, id) {
+    if (!editing || draggingId !== id) return;
+    event.stopPropagation();
+    const point = percentFromClientPoint(event.clientX, event.clientY);
+    if (point) onMove(id, point.x, point.y);
+  }
+
+  function handleMarkerPointerUp(event, id) {
+    event.stopPropagation();
+    if (draggingId !== id) return;
+    setDraggingId(null);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  if (status === "error") {
+    return (
+      <div className="panorama-fallback">
+        <ImageStage imageUrl={imageUrl} hotspots={hotspots} selectedId={selectedId} editing={editing} onAdd={onAdd} onSelect={onSelect} onMove={onMove} />
+        <p className="hint">360° 이미지를 입체로 불러오지 못해 평면으로 표시합니다. (이미지 저장소의 CORS 설정을 확인해 주세요.)</p>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <ImageStage {...props} />
-      <p className="hint">현재 360° 자료는 평면 미리보기로 표시됩니다.</p>
+    <div
+      className={`stage panorama-stage ${editing ? "editing" : ""}`}
+      ref={stageRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+    >
+      <div ref={mountRef} className="panorama-canvas" />
+      {status !== "ready" && <div className="model-overlay-message">360° 이미지를 불러오는 중입니다...</div>}
+      {status === "ready" &&
+        hotspots.map((hotspot) => {
+          const position = markerPositions[hotspot.id];
+          const hidden = !position || position.hidden;
+          return (
+            <HotspotMarker
+              key={hotspot.id}
+              hotspot={hotspot}
+              selected={selectedId === hotspot.id}
+              onPointerDown={(event) => handleMarkerPointerDown(event, hotspot.id)}
+              onPointerMove={(event) => handleMarkerPointerMove(event, hotspot.id)}
+              onPointerUp={(event) => handleMarkerPointerUp(event, hotspot.id)}
+              onPointerCancel={() => setDraggingId(null)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect(hotspot.id);
+              }}
+              style={{
+                left: `${position?.x ?? 50}%`,
+                top: `${position?.y ?? 50}%`,
+                opacity: hidden ? 0 : 1,
+                pointerEvents: hidden ? "none" : "auto",
+              }}
+            />
+          );
+        })}
+      <div className="panorama-help">
+        {editing ? "드래그해서 둘러보고, 클릭해 핫스팟 추가 · 마커를 끌어 위치 이동" : "드래그해서 둘러보세요 · 휠이나 두 손가락으로 확대"}
+      </div>
     </div>
   );
 }
@@ -1534,7 +1995,123 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
   );
 }
 
-function HotspotModal({ hotspot, onClose }) {
+const CHOICE_MARKS = ["①", "②", "③", "④", "⑤"];
+
+function QuizBox({ quiz, solved, onSolve }) {
+  const [answer, setAnswer] = useState("");
+  const [result, setResult] = useState(null);
+  const [wrongChoices, setWrongChoices] = useState([]);
+  const [showHint, setShowHint] = useState(false);
+  const isChoice = quizType(quiz) === "choice";
+
+  function submit(event) {
+    event.preventDefault();
+    if (solved) return;
+    if (isCorrectQuizAnswer(quiz, answer)) {
+      setResult("correct");
+      onSolve();
+    } else {
+      setResult("wrong");
+    }
+  }
+
+  function pickChoice(index) {
+    if (solved) return;
+    if (index === quiz.correctIndex) {
+      setResult("correct");
+      onSolve();
+    } else {
+      setResult("wrong");
+      setWrongChoices((items) => (items.includes(index) ? items : [...items, index]));
+    }
+  }
+
+  return (
+    <form className={`quiz-box ${solved ? "solved" : ""}`} onSubmit={submit}>
+      <div className="quiz-label">
+        <KeyRound size={16} /> {isChoice ? "객관식 문제" : "문제"}
+      </div>
+      <p className="quiz-question">{quiz.question || (isChoice ? "알맞은 답을 고르세요." : "정답을 입력해 보세요.")}</p>
+      {isChoice ? (
+        <div className="quiz-choices" role="group" aria-label="보기">
+          {quizChoiceOptions(quiz).map((option, order) => {
+            const isAnswer = solved && option.index === quiz.correctIndex;
+            const isWrong = !solved && wrongChoices.includes(option.index);
+            return (
+              <button
+                type="button"
+                key={option.index}
+                className={`quiz-choice ${isAnswer ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
+                disabled={solved || isWrong}
+                onClick={() => pickChoice(option.index)}
+              >
+                <span className="quiz-choice-mark">{CHOICE_MARKS[order] || order + 1}</span>
+                {option.text}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="quiz-input-row">
+          <input
+            aria-label="정답"
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            disabled={solved}
+            placeholder={solved ? "해결한 문제예요" : "정답 입력"}
+          />
+          <Button type="submit" disabled={solved || !answer.trim()}>
+            확인
+          </Button>
+        </div>
+      )}
+      {solved && (
+        <p className="quiz-feedback correct" role="status">
+          <Check size={16} /> 정답!
+        </p>
+      )}
+      {!solved && result === "wrong" && (
+        <p className="quiz-feedback wrong" role="status">
+          다시 생각해 보세요.
+        </p>
+      )}
+      {quiz.hint && !solved &&
+        (showHint ? (
+          <p className="quiz-hint">힌트: {quiz.hint}</p>
+        ) : (
+          <button type="button" className={`quiz-hint-button ${result === "wrong" ? "emphasis" : ""}`} onClick={() => setShowHint(true)}>
+            힌트 보기
+          </button>
+        ))}
+    </form>
+  );
+}
+
+function LockNotice({ gate, onClose }) {
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <article className="modal lock-notice" role="alertdialog" aria-label="잠긴 문" onClick={(event) => event.stopPropagation()}>
+        <Lock size={30} />
+        <h2>문이 잠겨 있어요</h2>
+        <p>
+          열쇠 {gate.solved}/{gate.total}개를 찾았어요. 남은 문제를 풀어야 문이 열려요.
+        </p>
+        <Button onClick={onClose}>확인</Button>
+      </article>
+    </div>
+  );
+}
+
+// quiz: 열쇠 핫스팟이면 { solved, onSolve }, 아니면 null.
+function HotspotModal({ hotspot, quiz = null, onClose }) {
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const embed = parseEmbed(hotspot.embedCode);
   const videoEmbed = hotspot.contentType === "video" ? parseEmbed(hotspot.mediaUrl) : null;
@@ -1616,7 +2193,133 @@ function HotspotModal({ hotspot, onClose }) {
             </div>
           )}
         </div>
+        {quiz && <QuizBox key={hotspot.id} quiz={hotspot.quiz} solved={quiz.solved} onSolve={quiz.onSolve} />}
       </article>
+    </div>
+  );
+}
+
+const MAX_QUIZ_CHOICES = 5;
+
+function QuizEditor({ hotspot, onChange }) {
+  const quiz = hotspot.quiz || {};
+  const type = quizType(quiz);
+  const choices = Array.isArray(quiz.choices) ? quiz.choices : [];
+  // 쉼표를 입력하는 도중에도 글자가 사라지지 않도록 입력 원문은 따로 둔다.
+  const [answersText, setAnswersText] = useState(() => (Array.isArray(quiz.answers) ? quiz.answers.join(", ") : ""));
+  const ready = isQuizReady(quiz);
+
+  function patch(next) {
+    onChange({
+      ...hotspot,
+      quiz: {
+        enabled: quiz.enabled === true,
+        type,
+        question: quiz.question || "",
+        answers: Array.isArray(quiz.answers) ? quiz.answers : [],
+        choices,
+        correctIndex: Number.isInteger(quiz.correctIndex) ? quiz.correctIndex : null,
+        hint: quiz.hint || "",
+        ...next,
+      },
+    });
+  }
+
+  function selectType(nextType) {
+    // 객관식으로 처음 바꾸면 빈 보기 4개를 만들어 둔다.
+    patch(nextType === "choice" && !choices.length ? { type: nextType, choices: ["", "", "", ""] } : { type: nextType });
+  }
+
+  function updateChoice(index, text) {
+    patch({ choices: choices.map((choice, position) => (position === index ? text : choice)) });
+  }
+
+  function removeChoice(index) {
+    const correctIndex = quiz.correctIndex === index ? null : quiz.correctIndex > index ? quiz.correctIndex - 1 : quiz.correctIndex;
+    patch({ choices: choices.filter((_, position) => position !== index), correctIndex });
+  }
+
+  const warning =
+    type === "choice"
+      ? quizChoiceOptions(quiz).length < 2
+        ? "보기를 2개 이상 입력해야 열쇠로 동작합니다."
+        : "정답 보기를 동그라미로 골라야 열쇠로 동작합니다."
+      : "정답을 하나 이상 입력해야 열쇠로 동작합니다.";
+
+  return (
+    <div className="quiz-editor">
+      <label className="toggle-row quiz-toggle">
+        <input type="checkbox" checked={quiz.enabled === true} onChange={(event) => patch({ enabled: event.target.checked })} />
+        <KeyRound size={15} /> 문제(열쇠)로 사용
+      </label>
+      {quiz.enabled !== true && <p className="field-note">켜면 학생이 이 문제를 맞혀야 이 장면의 문(장면 이동)이 열립니다.</p>}
+      {quiz.enabled === true && (
+        <>
+          <label>문제 유형</label>
+          <div className="segmented">
+            <button className={type === "short" ? "active" : ""} onClick={() => selectType("short")}>
+              단답형
+            </button>
+            <button className={type === "choice" ? "active" : ""} onClick={() => selectType("choice")}>
+              객관식
+            </button>
+          </div>
+          <label>질문</label>
+          <input
+            value={quiz.question || ""}
+            onChange={(event) => patch({ question: event.target.value })}
+            placeholder={type === "choice" ? "예: 정전에 모셔지지 않은 왕들은 어디에 있을까요?" : "예: 근정전 천장의 용 발톱은 몇 개일까요?"}
+          />
+          {type === "choice" ? (
+            <>
+              <label>보기 (정답에 동그라미)</label>
+              <div className="choice-editor">
+                {choices.map((choice, index) => (
+                  <div className="choice-editor-row" key={index}>
+                    <input
+                      type="radio"
+                      name={`quiz-correct-${hotspot.id}`}
+                      aria-label={`보기 ${index + 1}을 정답으로`}
+                      checked={quiz.correctIndex === index}
+                      onChange={() => patch({ correctIndex: index })}
+                    />
+                    <input value={choice} onChange={(event) => updateChoice(index, event.target.value)} placeholder={`보기 ${index + 1}`} />
+                    <Button variant="ghost" title="보기 삭제" onClick={() => removeChoice(index)} disabled={choices.length <= 2}>
+                      <X size={14} />
+                    </Button>
+                  </div>
+                ))}
+                {choices.length < MAX_QUIZ_CHOICES && (
+                  <Button variant="secondary" onClick={() => patch({ choices: [...choices, ""] })}>
+                    <Plus size={14} /> 보기 추가
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <label>정답 (쉼표로 여러 개)</label>
+              <input
+                value={answersText}
+                onChange={(event) => {
+                  setAnswersText(event.target.value);
+                  patch({ answers: splitQuizAnswers(event.target.value) });
+                }}
+                placeholder="예: 7, 7개, 일곱"
+              />
+            </>
+          )}
+          <label>힌트 (선택)</label>
+          <input value={quiz.hint || ""} onChange={(event) => patch({ hint: event.target.value })} placeholder="예: 천장 가운데 황룡을 확대해 보세요." />
+          <p className={`field-note ${ready ? "" : "warning"}`}>
+            {ready
+              ? type === "choice"
+                ? "이 장면의 열쇠를 모두 맞혀야 장면 이동 핫스팟이 열립니다. 학생이 틀린 보기는 흐리게 바뀌어요."
+                : "이 장면의 열쇠를 모두 맞혀야 장면 이동 핫스팟이 열립니다. 띄어쓰기·대소문자는 무시하고 비교해요."
+              : warning}
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -1625,6 +2328,7 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
   const fileRef = useRef(null);
   if (!hotspot) return <div className="empty-panel">이미지를 클릭해 핫스팟을 만들거나 왼쪽 목록에서 선택하세요.</div>;
   const otherScenes = scenes.filter((scene) => scene.id !== currentSceneId);
+  const sceneKeyCount = sceneKeyHotspots(scenes.find((scene) => scene.id === currentSceneId)).length;
 
   function selectContentType(type) {
     if (type === "scene") {
@@ -1721,6 +2425,7 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
           </button>
         ))}
       </div>
+      {hotspot.contentType !== "scene" && <QuizEditor key={hotspot.id} hotspot={hotspot} onChange={onChange} />}
       {hotspot.contentType === "scene" && (
         <>
           <label>이동할 장면</label>
@@ -1740,6 +2445,12 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
             {otherScenes.length
               ? "학생이 이 핫스팟을 누르면 선택한 장면으로 이동합니다. 미리보기에서 바로 확인할 수 있어요."
               : "왼쪽 장면 목록에서 장면을 추가하면 여기서 연결할 수 있습니다."}
+          </p>
+          <p className="field-note lock-note">
+            <Lock size={13} />{" "}
+            {sceneKeyCount
+              ? `이 장면의 열쇠 ${sceneKeyCount}개를 모두 풀어야 열립니다.`
+              : "이 장면에는 문제(열쇠)가 없어 바로 열립니다."}
           </p>
         </>
       )}
@@ -1820,7 +2531,7 @@ function SceneThumb({ scene }) {
   );
 }
 
-function ScenePanel({ scenes, activeSceneId, canEdit, onSelect, onAdd, onRename, onMove, onRemove }) {
+function ScenePanel({ scenes, activeSceneId, canEdit, sequential, onToggleSequential, onSelect, onAdd, onRename, onMove, onRemove }) {
   return (
     <section className="scene-panel">
       <div className="panel-heading">
@@ -1876,6 +2587,12 @@ function ScenePanel({ scenes, activeSceneId, canEdit, onSelect, onAdd, onRename,
           );
         })}
       </div>
+      {canEdit && scenes.length > 1 && (
+        <label className="toggle-row scene-setting">
+          <input type="checkbox" checked={sequential} onChange={(event) => onToggleSequential(event.target.checked)} />
+          순서대로 진행 (학생 화면에서 장면 바로가기 숨김)
+        </label>
+      )}
     </section>
   );
 }
@@ -1899,8 +2616,10 @@ function Editor({ user, authLoading, accessToken }) {
   const [saving, setSaving] = useState(false);
   const [projectLoading, setProjectLoading] = useState(isExistingProject);
   const [projectMissing, setProjectMissing] = useState(false);
+  const [lockNotice, setLockNotice] = useState(null);
   const fileRef = useRef(null);
   const lastIdParamRef = useRef(idParam);
+  const quizProgress = useQuizProgress(projectId);
   const mapsKey = useRuntimeGoogleMapsBrowserKey(accessToken);
 
   const activeScene = scenes.find((scene) => scene.id === activeSceneId) || scenes[0];
@@ -2016,9 +2735,23 @@ function Editor({ user, authLoading, accessToken }) {
     }
   }
 
+  function setSequential(sequential) {
+    setScenes((items) =>
+      items.map((scene, index) => {
+        const { sequential: _previous, ...settings } = scene.settings || {};
+        return { ...scene, settings: index === 0 ? { ...settings, sequential } : settings };
+      }),
+    );
+  }
+
   function openHotspotContent(id) {
     const hotspot = hotspots.find((item) => item.id === id);
     if (hotspot?.contentType === "scene") {
+      const gate = sceneGate(activeScene, quizProgress.isSolved);
+      if (!gate.open) {
+        setLockNotice(gate);
+        return;
+      }
       if (hotspot.targetSceneId && scenes.some((scene) => scene.id === hotspot.targetSceneId)) {
         switchScene(hotspot.targetSceneId);
       } else {
@@ -2177,7 +2910,7 @@ function Editor({ user, authLoading, accessToken }) {
     const projectSource = { imageUrl, backgroundType, ...sourceMetadata };
     const props = {
       key: activeScene.id,
-      hotspots,
+      hotspots: editingEnabled ? hotspots : decorateHotspotsWithLocks(activeScene, quizProgress.isSolved),
       selectedId,
       editing: editingEnabled,
       onAdd: addHotspot,
@@ -2191,9 +2924,10 @@ function Editor({ user, authLoading, accessToken }) {
     }
     return <ImageStage imageUrl={imageUrl} {...props} />;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeScene.id, backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, scenes, selectedId, sourceMetadata]);
+  }, [activeScene, backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, quizProgress.isSolved, scenes, selectedId, sourceMetadata]);
 
   const activeContent = hotspots.find((hotspot) => hotspot.id === activeContentId);
+  const projectHasKeys = scenes.some((scene) => sceneKeyHotspots(scene).length > 0);
   const uploadGuidance = UPLOAD_GUIDANCE[backgroundType] || UPLOAD_GUIDANCE.image;
   const sceneNameById = (id) => scenes.find((scene) => scene.id === id)?.name || "";
 
@@ -2277,6 +3011,8 @@ function Editor({ user, authLoading, accessToken }) {
             scenes={scenes}
             activeSceneId={activeScene.id}
             canEdit={canEdit}
+            sequential={isSequentialProject(scenes)}
+            onToggleSequential={setSequential}
             onSelect={switchScene}
             onAdd={addScene}
             onRename={renameScene}
@@ -2298,6 +3034,11 @@ function Editor({ user, authLoading, accessToken }) {
               >
                 <span>
                   #{index + 1} {hotspot.title || "제목 없는 핫스팟"}
+                  {isQuizHotspot(hotspot) && (
+                    <small className="hotspot-scene-link">
+                      <KeyRound size={11} /> 문제(열쇠)
+                    </small>
+                  )}
                   {hotspot.contentType === "scene" && (
                     <small className="hotspot-scene-link">
                       → {hotspot.targetSceneId ? sceneNameById(hotspot.targetSceneId) || "삭제된 장면" : "장면 미지정"}
@@ -2320,6 +3061,11 @@ function Editor({ user, authLoading, accessToken }) {
                 </div>
               )}
               {stage}
+              {!editingEnabled && projectHasKeys && (
+                <Button variant="ghost" className="quiz-reset" onClick={quizProgress.reset} title="미리보기에서 푼 문제를 모두 처음 상태로 되돌립니다">
+                  <RotateCcw size={15} /> 문제 풀이 초기화
+                </Button>
+              )}
               <SourceAttribution project={sourceMetadata} />
               {mapsKey.error && backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
             </div>
@@ -2365,7 +3111,21 @@ function Editor({ user, authLoading, accessToken }) {
           )}
         </aside>
       </div>
-      {!editingEnabled && activeContent && <HotspotModal hotspot={activeContent} onClose={() => setActiveContentId(null)} />}
+      {!editingEnabled && activeContent && (
+        <HotspotModal
+          hotspot={activeContent}
+          quiz={
+            isQuizHotspot(activeContent)
+              ? {
+                  solved: quizProgress.isSolved(activeScene.id, activeContent.id),
+                  onSolve: () => quizProgress.markSolved(activeScene.id, activeContent.id),
+                }
+              : null
+          }
+          onClose={() => setActiveContentId(null)}
+        />
+      )}
+      {lockNotice && <LockNotice gate={lockNotice} onClose={() => setLockNotice(null)} />}
       {streetViewImportOpen && (
         <GoogleStreetViewImportModal
           accessToken={accessToken}
@@ -2387,7 +3147,14 @@ function ViewProject() {
   const [activeId, setActiveId] = useState(null);
   const [activeSceneId, setActiveSceneId] = useState(null);
   const [shareUrl, setShareUrl] = useState("");
+  const [lockNotice, setLockNotice] = useState(null);
   const mapsKey = useRuntimeGoogleMapsBrowserKey();
+  const quizProgress = useQuizProgress(id);
+  const scene = project ? project.scenes.find((item) => item.id === activeSceneId) || project.scenes[0] : null;
+  const sceneHotspots = useMemo(
+    () => (scene ? decorateHotspotsWithLocks(scene, quizProgress.isSolved) : []),
+    [scene, quizProgress.isSolved],
+  );
 
   useEffect(() => {
     if (!id) {
@@ -2417,7 +3184,7 @@ function ViewProject() {
   if (!project) return <main className="centered muted">불러오는 중...</main>;
 
   const scenes = project.scenes;
-  const scene = scenes.find((item) => item.id === activeSceneId) || scenes[0];
+  const sequential = isSequentialProject(scenes);
   const sceneIndex = scenes.findIndex((item) => item.id === scene.id);
   const active = scene.hotspots.find((hotspot) => hotspot.id === activeId);
   const viewShareUrl = `${window.location.origin}/view/${project.id}`;
@@ -2431,6 +3198,11 @@ function ViewProject() {
   function handleHotspotSelect(hotspotId) {
     const hotspot = scene.hotspots.find((item) => item.id === hotspotId);
     if (hotspot?.contentType === "scene") {
+      const gate = sceneGate(scene, quizProgress.isSolved);
+      if (!gate.open) {
+        setLockNotice(gate);
+        return;
+      }
       if (hotspot.targetSceneId) goToScene(hotspot.targetSceneId);
       return;
     }
@@ -2439,7 +3211,7 @@ function ViewProject() {
 
   const props = {
     key: scene.id,
-    hotspots: scene.hotspots,
+    hotspots: sceneHotspots,
     editing: false,
     selectedId: null,
     onAdd: () => {},
@@ -2460,7 +3232,7 @@ function ViewProject() {
           )}
         </div>
         <div className="viewer-actions">
-          {scenes.length > 1 && sceneIndex > 0 && (
+          {!sequential && scenes.length > 1 && sceneIndex > 0 && (
             <Button variant="ghost" onClick={() => goToScene(scenes[0].id)}>
               <Layers size={16} /> 첫 장면
             </Button>
@@ -2488,7 +3260,7 @@ function ViewProject() {
           )}
           <SourceAttribution project={scene} />
           {mapsKey.error && scene.backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
-          {scenes.length > 1 && (
+          {!sequential && scenes.length > 1 && (
             <nav className="scene-nav" aria-label="장면 이동">
               {scenes.map((item, index) => (
                 <button
@@ -2505,7 +3277,18 @@ function ViewProject() {
           )}
         </div>
       </section>
-      {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
+      {active && (
+        <HotspotModal
+          hotspot={active}
+          quiz={
+            isQuizHotspot(active)
+              ? { solved: quizProgress.isSolved(scene.id, active.id), onSolve: () => quizProgress.markSolved(scene.id, active.id) }
+              : null
+          }
+          onClose={() => setActiveId(null)}
+        />
+      )}
+      {lockNotice && <LockNotice gate={lockNotice} onClose={() => setLockNotice(null)} />}
       {shareUrl && <ShareLinkModal title="보기 링크 공유" url={shareUrl} onClose={() => setShareUrl("")} />}
     </main>
   );

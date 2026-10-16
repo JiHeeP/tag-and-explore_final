@@ -557,16 +557,29 @@ a {
   position: absolute;
   top: 14px;
   transform: translateX(-50%);
+  white-space: nowrap;
   z-index: 2;
+}
+
+/* 핫스팟 좌표(%)는 틀 기준이므로 틀을 이미지 크기에 딱 맞춘다. */
+.image-stage {
+  max-width: min(1100px, 100%);
+  width: fit-content;
+}
+
+.stage.image-stage.is-loading {
+  min-height: min(50vh, 420px);
+  width: 100%;
 }
 
 .image-stage img {
   border-radius: var(--radius-lg);
   display: block;
   max-height: min(72vh, 720px);
+  max-width: 100%;
   object-fit: contain;
   user-select: none;
-  width: 100%;
+  width: auto;
 }
 
 .model-stage {
@@ -576,6 +589,58 @@ a {
 
 .model-canvas {
   height: 540px;
+  width: 100%;
+}
+
+.panorama-stage {
+  cursor: grab;
+  min-height: 540px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.panorama-stage:active {
+  cursor: grabbing;
+}
+
+.panorama-stage.editing {
+  cursor: crosshair;
+}
+
+.panorama-canvas {
+  height: 540px;
+  width: 100%;
+}
+
+.panorama-canvas canvas {
+  border-radius: var(--radius-lg);
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.panorama-help {
+  background: rgb(17 24 39 / 0.72);
+  border-radius: 999px;
+  bottom: 14px;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 7px 12px;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.panorama-fallback {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
   width: 100%;
 }
 
@@ -852,6 +917,7 @@ a {
   font-size: clamp(16px, 1.4vw, 19px);
   line-height: 1.72;
   margin: 0;
+  white-space: pre-line;
 }
 
 .share-modal {
@@ -1360,6 +1426,8 @@ a {
 
 .viewer-page .model-stage,
 .viewer-page .model-canvas,
+.viewer-page .panorama-stage,
+.viewer-page .panorama-canvas,
 .viewer-page .streetview-dynamic-stage,
 .viewer-page .streetview-canvas {
   height: calc(100vh - 112px);
@@ -1437,6 +1505,8 @@ a {
 
   .viewer-page .model-stage,
   .viewer-page .model-canvas,
+  .viewer-page .panorama-stage,
+  .viewer-page .panorama-canvas,
   .viewer-page .streetview-dynamic-stage,
   .viewer-page .streetview-canvas {
     height: calc(100vh - 134px);
@@ -1682,4 +1752,281 @@ a {
   min-height: 320px;
   padding: 24px;
   text-align: center;
+}
+
+/* ── 열쇠(문제) / 문(장면 이동) 잠금 ── */
+.marker-badge {
+  align-items: center;
+  background: var(--muted);
+  border: 2px solid white;
+  border-radius: 999px;
+  color: white;
+  display: flex;
+  height: 18px;
+  justify-content: center;
+  position: absolute;
+  right: -7px;
+  top: -7px;
+  width: 18px;
+}
+
+.marker-key .marker-badge {
+  background: oklch(0.72 0.16 70);
+}
+
+.marker-solved .marker-badge {
+  background: oklch(0.6 0.16 150);
+}
+
+.marker-locked {
+  filter: grayscale(0.75);
+}
+
+.marker-locked::after {
+  animation: none;
+}
+
+.quiz-box {
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-soft);
+  border-radius: var(--radius-lg);
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+  padding: 18px;
+}
+
+.quiz-box.solved {
+  background: oklch(0.97 0.03 150);
+  border-color: oklch(0.86 0.08 150);
+}
+
+.quiz-label {
+  align-items: center;
+  color: var(--accent-strong);
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.quiz-question {
+  font-size: clamp(17px, 1.5vw, 20px);
+  font-weight: 700;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.quiz-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.quiz-input-row input {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  flex: 1;
+  font-size: 17px;
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 12px;
+}
+
+.quiz-input-row input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 0;
+}
+
+.quiz-input-row .button {
+  min-height: 44px;
+}
+
+.quiz-feedback {
+  align-items: center;
+  display: flex;
+  font-size: 16px;
+  font-weight: 800;
+  gap: 6px;
+  margin: 0;
+}
+
+.quiz-feedback.correct {
+  color: oklch(0.48 0.15 150);
+}
+
+.quiz-feedback.wrong {
+  color: var(--danger);
+}
+
+.quiz-hint {
+  color: var(--foreground);
+  margin: 0;
+}
+
+.quiz-hint-button {
+  background: transparent;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-weight: 700;
+  justify-self: start;
+  padding: 6px 14px;
+}
+
+.quiz-hint-button.emphasis {
+  animation: hintPulse 1.2s ease-in-out 2;
+  background: var(--accent);
+  border-style: solid;
+  color: white;
+}
+
+@keyframes hintPulse {
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+.modal.lock-notice {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  max-width: 420px;
+  text-align: center;
+}
+
+.lock-notice h2 {
+  margin: 0;
+}
+
+.lock-notice p {
+  line-height: 1.6;
+  margin: 0;
+}
+
+.toggle-row {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+}
+
+.inspector .toggle-row {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.toggle-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  flex: none;
+  height: 18px;
+  min-height: 0;
+  width: 18px;
+}
+
+.quiz-editor {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.field-note.warning {
+  color: var(--danger);
+}
+
+.lock-note {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.scene-setting {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 10px;
+}
+
+.quiz-reset {
+  font-size: 13px;
+}
+
+/* 객관식 문제 */
+.quiz-choices {
+  display: grid;
+  gap: 8px;
+}
+
+.quiz-choice {
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  cursor: pointer;
+  display: flex;
+  font-size: 16px;
+  gap: 10px;
+  min-height: 46px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.quiz-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.quiz-choice-mark {
+  color: var(--accent-strong);
+  flex: none;
+  font-weight: 800;
+}
+
+.quiz-choice.wrong {
+  cursor: default;
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.quiz-choice.correct {
+  background: oklch(0.93 0.07 150);
+  border-color: oklch(0.6 0.16 150);
+  font-weight: 700;
+}
+
+.quiz-choice:disabled:not(.wrong):not(.correct) {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.choice-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.choice-editor-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.inspector .choice-editor-row input[type="radio"] {
+  accent-color: oklch(0.6 0.16 150);
+  flex: none;
+  height: 18px;
+  min-height: 0;
+  width: 18px;
+}
+
+.choice-editor-row input:not([type="radio"]) {
+  flex: 1;
+  min-width: 0;
+}
+
+.quiz-toggle {
+  font-size: 14px !important;
 }
