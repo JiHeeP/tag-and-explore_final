@@ -560,13 +560,20 @@ a {
   z-index: 2;
 }
 
+/* 핫스팟 좌표(%)는 틀 기준이므로 틀을 이미지 크기에 딱 맞춘다. */
+.image-stage {
+  max-width: min(1100px, 100%);
+  width: fit-content;
+}
+
 .image-stage img {
   border-radius: var(--radius-lg);
   display: block;
   max-height: min(72vh, 720px);
+  max-width: 100%;
   object-fit: contain;
   user-select: none;
-  width: 100%;
+  width: auto;
 }
 
 .model-stage {
@@ -852,6 +859,7 @@ a {
   font-size: clamp(16px, 1.4vw, 19px);
   line-height: 1.72;
   margin: 0;
+  white-space: pre-line;
 }
 
 .share-modal {
