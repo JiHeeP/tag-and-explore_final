@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/react";
 import {
   ArrowLeft,
   Box,
+  Check,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -17,11 +18,14 @@ import {
   FileImage,
   Globe2,
   Info,
+  KeyRound,
   Layers,
   Link as LinkIcon,
+  Lock,
   LogOut,
   MapPinned,
   Plus,
+  RotateCcw,
   Save,
   Share2,
   Sparkles,
@@ -99,6 +103,119 @@ function normalizeHotspots(hotspots = []) {
       mediaItems,
     };
   });
+}
+
+// 열쇠(문제) 핫스팟: 같은 장면의 열쇠를 모두 맞혀야 그 장면의 문(장면 이동) 핫스팟이 열린다.
+// 정답이 하나도 없는 문제는 학생이 풀 수 없으므로 열쇠로 치지 않는다.
+function normalizeQuizAnswer(value) {
+  return String(value ?? "")
+    .normalize("NFC")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+}
+
+function splitQuizAnswers(text) {
+  return String(text || "")
+    .split(/[,，]/)
+    .map((answer) => answer.trim())
+    .filter(Boolean);
+}
+
+function quizAnswers(quiz) {
+  return (Array.isArray(quiz?.answers) ? quiz.answers : []).map(normalizeQuizAnswer).filter(Boolean);
+}
+
+function isCorrectQuizAnswer(quiz, input) {
+  const guess = normalizeQuizAnswer(input);
+  return Boolean(guess) && quizAnswers(quiz).includes(guess);
+}
+
+function isQuizHotspot(hotspot) {
+  return hotspot?.contentType !== "scene" && hotspot?.quiz?.enabled === true && quizAnswers(hotspot.quiz).length > 0;
+}
+
+function sceneKeyHotspots(scene) {
+  return (scene?.hotspots || []).filter(isQuizHotspot);
+}
+
+// 순서 진행(장면 바로가기 숨김) 설정은 첫 장면의 settings.sequential에 둔다.
+// 정해 두지 않았으면 열쇠 핫스팟이 하나라도 있을 때 켜진다.
+function isSequentialProject(scenes = []) {
+  const setting = scenes.find((scene) => typeof scene.settings?.sequential === "boolean")?.settings.sequential;
+  if (typeof setting === "boolean") return setting;
+  return scenes.some((scene) => sceneKeyHotspots(scene).length > 0);
+}
+
+function sceneGate(scene, isSolved) {
+  const keys = sceneKeyHotspots(scene);
+  const solved = keys.filter((hotspot) => isSolved(scene.id, hotspot.id)).length;
+  return { total: keys.length, solved, open: solved >= keys.length };
+}
+
+// 화면 표시용 lockState만 덧붙인 사본. 저장 데이터에는 쓰지 않는다.
+function decorateHotspotsWithLocks(scene, isSolved) {
+  const gate = sceneGate(scene, isSolved);
+  return scene.hotspots.map((hotspot) => {
+    if (isQuizHotspot(hotspot)) return { ...hotspot, lockState: isSolved(scene.id, hotspot.id) ? "solved" : "key" };
+    if (hotspot.contentType === "scene" && gate.total > 0) return { ...hotspot, lockState: gate.open ? "open" : "locked" };
+    return hotspot;
+  });
+}
+
+function quizStorageKey(projectId, sceneId, hotspotId) {
+  return `${projectId}:${sceneId}:${hotspotId}`;
+}
+
+function readSolvedQuizzes(projectId) {
+  const solved = {};
+  if (!projectId) return solved;
+  try {
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(`${projectId}:`) && sessionStorage.getItem(key) === "solved") solved[key] = true;
+    }
+  } catch {
+    // sessionStorage를 쓸 수 없으면 메모리 상태로만 동작한다.
+  }
+  return solved;
+}
+
+// 풀이 상태는 탭 단위(sessionStorage)로 유지: 새로고침해도 남고 탭을 닫으면 초기화된다.
+function useQuizProgress(projectId) {
+  const [solved, setSolved] = useState(() => readSolvedQuizzes(projectId));
+
+  useEffect(() => {
+    setSolved(readSolvedQuizzes(projectId));
+  }, [projectId]);
+
+  const isSolved = useCallback(
+    (sceneId, hotspotId) => Boolean(solved[quizStorageKey(projectId, sceneId, hotspotId)]),
+    [projectId, solved],
+  );
+
+  const markSolved = useCallback(
+    (sceneId, hotspotId) => {
+      const key = quizStorageKey(projectId, sceneId, hotspotId);
+      try {
+        sessionStorage.setItem(key, "solved");
+      } catch {
+        // 메모리 상태만 갱신한다.
+      }
+      setSolved((current) => ({ ...current, [key]: true }));
+    },
+    [projectId],
+  );
+
+  const reset = useCallback(() => {
+    try {
+      Object.keys(readSolvedQuizzes(projectId)).forEach((key) => sessionStorage.removeItem(key));
+    } catch {
+      // 메모리 상태만 비운다.
+    }
+    setSolved({});
+  }, [projectId]);
+
+  return { isSolved, markSolved, reset };
 }
 
 const SOURCE_FIELDS = [
@@ -1028,16 +1145,27 @@ function Home({ user, authLoading }) {
 }
 
 function HotspotMarker({ hotspot, selected, onClick, style, ...props }) {
-  const Icon = icons.find((item) => item.value === hotspot.icon)?.icon || Info;
+  const { lockState } = hotspot;
+  const isNumber = hotspot.markerMode === "number";
+  const Icon =
+    lockState === "locked" ? Lock : lockState === "open" ? DoorOpen : icons.find((item) => item.value === hotspot.icon)?.icon || Info;
+  const BadgeIcon =
+    lockState === "solved" ? Check : lockState === "key" ? KeyRound : lockState === "locked" && isNumber ? Lock : null;
+  const title = hotspot.title || "Hotspot";
   return (
     <button
-      className={`marker ${selected ? "selected" : ""}`}
+      className={`marker ${selected ? "selected" : ""} ${lockState ? `marker-${lockState}` : ""}`}
       onClick={onClick}
       style={{ "--marker": hotspot.markerColor || defaultColor, ...style }}
-      title={hotspot.title || "Hotspot"}
+      title={lockState === "locked" ? `${title} (잠김)` : lockState === "solved" ? `${title} (해결)` : title}
       {...props}
     >
-      {hotspot.markerMode === "number" ? hotspot.markerNumber : <Icon size={18} />}
+      {isNumber ? hotspot.markerNumber : <Icon size={18} />}
+      {BadgeIcon && (
+        <span className="marker-badge" aria-hidden="true">
+          <BadgeIcon size={11} strokeWidth={3} />
+        </span>
+      )}
     </button>
   );
 }
@@ -1046,6 +1174,9 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
   const ref = useRef(null);
   const imageRef = useRef(null);
   const [draggingId, setDraggingId] = useState(null);
+  // 틀이 이미지 크기에 맞춰지므로, 이미지를 받기 전에는 자리만 잡아 둔다.
+  const [loadedUrl, setLoadedUrl] = useState(null);
+  const imageReady = loadedUrl === imageUrl;
 
   function positionFromPoint(clientX, clientY) {
     const target = imageRef.current || ref.current;
@@ -1084,9 +1215,16 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
   }
 
   return (
-    <div className="stage image-stage" ref={ref} onClick={handleClick}>
+    <div className={`stage image-stage ${imageReady ? "" : "is-loading"}`} ref={ref} onClick={handleClick}>
       {editing && <div className="stage-hint">이미지를 클릭해 핫스팟 추가</div>}
-      <img ref={imageRef} src={imageUrl} alt="" draggable={false} />
+      <img
+        ref={imageRef}
+        src={imageUrl}
+        alt=""
+        draggable={false}
+        onLoad={() => setLoadedUrl(imageUrl)}
+        onError={() => setLoadedUrl(imageUrl)}
+      />
       {hotspots.map((hotspot) => (
         <HotspotMarker
           key={hotspot.id}
@@ -1534,7 +1672,87 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
   );
 }
 
-function HotspotModal({ hotspot, onClose }) {
+function QuizBox({ quiz, solved, onSolve }) {
+  const [answer, setAnswer] = useState("");
+  const [result, setResult] = useState(null);
+  const [showHint, setShowHint] = useState(false);
+
+  function submit(event) {
+    event.preventDefault();
+    if (solved) return;
+    if (isCorrectQuizAnswer(quiz, answer)) {
+      setResult("correct");
+      onSolve();
+    } else {
+      setResult("wrong");
+    }
+  }
+
+  return (
+    <form className={`quiz-box ${solved ? "solved" : ""}`} onSubmit={submit}>
+      <div className="quiz-label">
+        <KeyRound size={16} /> 문제
+      </div>
+      <p className="quiz-question">{quiz.question || "정답을 입력해 보세요."}</p>
+      <div className="quiz-input-row">
+        <input
+          aria-label="정답"
+          value={answer}
+          onChange={(event) => setAnswer(event.target.value)}
+          disabled={solved}
+          placeholder={solved ? "해결한 문제예요" : "정답 입력"}
+        />
+        <Button type="submit" disabled={solved || !answer.trim()}>
+          확인
+        </Button>
+      </div>
+      {solved && (
+        <p className="quiz-feedback correct" role="status">
+          <Check size={16} /> 정답!
+        </p>
+      )}
+      {!solved && result === "wrong" && (
+        <p className="quiz-feedback wrong" role="status">
+          다시 생각해 보세요.
+        </p>
+      )}
+      {quiz.hint && !solved &&
+        (showHint ? (
+          <p className="quiz-hint">힌트: {quiz.hint}</p>
+        ) : (
+          <button type="button" className={`quiz-hint-button ${result === "wrong" ? "emphasis" : ""}`} onClick={() => setShowHint(true)}>
+            힌트 보기
+          </button>
+        ))}
+    </form>
+  );
+}
+
+function LockNotice({ gate, onClose }) {
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <article className="modal lock-notice" role="alertdialog" aria-label="잠긴 문" onClick={(event) => event.stopPropagation()}>
+        <Lock size={30} />
+        <h2>문이 잠겨 있어요</h2>
+        <p>
+          열쇠 {gate.solved}/{gate.total}개를 찾았어요. 남은 문제를 풀어야 문이 열려요.
+        </p>
+        <Button onClick={onClose}>확인</Button>
+      </article>
+    </div>
+  );
+}
+
+// quiz: 열쇠 핫스팟이면 { solved, onSolve }, 아니면 null.
+function HotspotModal({ hotspot, quiz = null, onClose }) {
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const embed = parseEmbed(hotspot.embedCode);
   const videoEmbed = hotspot.contentType === "video" ? parseEmbed(hotspot.mediaUrl) : null;
@@ -1616,7 +1834,63 @@ function HotspotModal({ hotspot, onClose }) {
             </div>
           )}
         </div>
+        {quiz && <QuizBox key={hotspot.id} quiz={hotspot.quiz} solved={quiz.solved} onSolve={quiz.onSolve} />}
       </article>
+    </div>
+  );
+}
+
+function QuizEditor({ hotspot, onChange }) {
+  const quiz = hotspot.quiz || {};
+  // 쉼표를 입력하는 도중에도 글자가 사라지지 않도록 입력 원문은 따로 둔다.
+  const [answersText, setAnswersText] = useState(() => (Array.isArray(quiz.answers) ? quiz.answers.join(", ") : ""));
+  const hasAnswers = quizAnswers(quiz).length > 0;
+
+  function patch(next) {
+    onChange({
+      ...hotspot,
+      quiz: {
+        enabled: quiz.enabled === true,
+        question: quiz.question || "",
+        answers: Array.isArray(quiz.answers) ? quiz.answers : [],
+        hint: quiz.hint || "",
+        ...next,
+      },
+    });
+  }
+
+  return (
+    <div className="quiz-editor">
+      <label className="toggle-row">
+        <input type="checkbox" checked={quiz.enabled === true} onChange={(event) => patch({ enabled: event.target.checked })} />
+        <KeyRound size={15} /> 문제(열쇠)로 사용
+      </label>
+      {quiz.enabled === true && (
+        <>
+          <label>질문</label>
+          <input
+            value={quiz.question || ""}
+            onChange={(event) => patch({ question: event.target.value })}
+            placeholder="예: 근정전 천장의 용 발톱은 몇 개일까요?"
+          />
+          <label>정답 (쉼표로 여러 개)</label>
+          <input
+            value={answersText}
+            onChange={(event) => {
+              setAnswersText(event.target.value);
+              patch({ answers: splitQuizAnswers(event.target.value) });
+            }}
+            placeholder="예: 7, 7개, 일곱"
+          />
+          <label>힌트 (선택)</label>
+          <input value={quiz.hint || ""} onChange={(event) => patch({ hint: event.target.value })} placeholder="예: 천장 가운데 황룡을 확대해 보세요." />
+          <p className={`field-note ${hasAnswers ? "" : "warning"}`}>
+            {hasAnswers
+              ? "이 장면의 열쇠를 모두 맞혀야 장면 이동 핫스팟이 열립니다. 띄어쓰기·대소문자는 무시하고 비교해요."
+              : "정답을 하나 이상 입력해야 열쇠로 동작합니다."}
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -1625,6 +1899,7 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
   const fileRef = useRef(null);
   if (!hotspot) return <div className="empty-panel">이미지를 클릭해 핫스팟을 만들거나 왼쪽 목록에서 선택하세요.</div>;
   const otherScenes = scenes.filter((scene) => scene.id !== currentSceneId);
+  const sceneKeyCount = sceneKeyHotspots(scenes.find((scene) => scene.id === currentSceneId)).length;
 
   function selectContentType(type) {
     if (type === "scene") {
@@ -1741,6 +2016,12 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
               ? "학생이 이 핫스팟을 누르면 선택한 장면으로 이동합니다. 미리보기에서 바로 확인할 수 있어요."
               : "왼쪽 장면 목록에서 장면을 추가하면 여기서 연결할 수 있습니다."}
           </p>
+          <p className="field-note lock-note">
+            <Lock size={13} />{" "}
+            {sceneKeyCount
+              ? `이 장면의 열쇠 ${sceneKeyCount}개를 모두 풀어야 열립니다.`
+              : "이 장면에는 문제(열쇠)가 없어 바로 열립니다."}
+          </p>
         </>
       )}
       <label>제목</label>
@@ -1753,6 +2034,7 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
       <textarea value={hotspot.description} onChange={(event) => onChange({ ...hotspot, description: event.target.value })} placeholder="학생에게 보여줄 설명을 입력하세요" />
       <label>링크 URL</label>
       <input value={hotspot.link || ""} onChange={(event) => onChange({ ...hotspot, link: event.target.value })} placeholder="https://..." />
+      {hotspot.contentType !== "scene" && <QuizEditor key={hotspot.id} hotspot={hotspot} onChange={onChange} />}
       {hotspot.contentType === "video" && (
         <>
           <label>영상 URL</label>
@@ -1820,7 +2102,7 @@ function SceneThumb({ scene }) {
   );
 }
 
-function ScenePanel({ scenes, activeSceneId, canEdit, onSelect, onAdd, onRename, onMove, onRemove }) {
+function ScenePanel({ scenes, activeSceneId, canEdit, sequential, onToggleSequential, onSelect, onAdd, onRename, onMove, onRemove }) {
   return (
     <section className="scene-panel">
       <div className="panel-heading">
@@ -1876,6 +2158,12 @@ function ScenePanel({ scenes, activeSceneId, canEdit, onSelect, onAdd, onRename,
           );
         })}
       </div>
+      {canEdit && scenes.length > 1 && (
+        <label className="toggle-row scene-setting">
+          <input type="checkbox" checked={sequential} onChange={(event) => onToggleSequential(event.target.checked)} />
+          순서대로 진행 (학생 화면에서 장면 바로가기 숨김)
+        </label>
+      )}
     </section>
   );
 }
@@ -1899,8 +2187,10 @@ function Editor({ user, authLoading, accessToken }) {
   const [saving, setSaving] = useState(false);
   const [projectLoading, setProjectLoading] = useState(isExistingProject);
   const [projectMissing, setProjectMissing] = useState(false);
+  const [lockNotice, setLockNotice] = useState(null);
   const fileRef = useRef(null);
   const lastIdParamRef = useRef(idParam);
+  const quizProgress = useQuizProgress(projectId);
   const mapsKey = useRuntimeGoogleMapsBrowserKey(accessToken);
 
   const activeScene = scenes.find((scene) => scene.id === activeSceneId) || scenes[0];
@@ -2016,9 +2306,23 @@ function Editor({ user, authLoading, accessToken }) {
     }
   }
 
+  function setSequential(sequential) {
+    setScenes((items) =>
+      items.map((scene, index) => {
+        const { sequential: _previous, ...settings } = scene.settings || {};
+        return { ...scene, settings: index === 0 ? { ...settings, sequential } : settings };
+      }),
+    );
+  }
+
   function openHotspotContent(id) {
     const hotspot = hotspots.find((item) => item.id === id);
     if (hotspot?.contentType === "scene") {
+      const gate = sceneGate(activeScene, quizProgress.isSolved);
+      if (!gate.open) {
+        setLockNotice(gate);
+        return;
+      }
       if (hotspot.targetSceneId && scenes.some((scene) => scene.id === hotspot.targetSceneId)) {
         switchScene(hotspot.targetSceneId);
       } else {
@@ -2177,7 +2481,7 @@ function Editor({ user, authLoading, accessToken }) {
     const projectSource = { imageUrl, backgroundType, ...sourceMetadata };
     const props = {
       key: activeScene.id,
-      hotspots,
+      hotspots: editingEnabled ? hotspots : decorateHotspotsWithLocks(activeScene, quizProgress.isSolved),
       selectedId,
       editing: editingEnabled,
       onAdd: addHotspot,
@@ -2191,9 +2495,10 @@ function Editor({ user, authLoading, accessToken }) {
     }
     return <ImageStage imageUrl={imageUrl} {...props} />;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeScene.id, backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, scenes, selectedId, sourceMetadata]);
+  }, [activeScene, backgroundType, editingEnabled, hotspots, imageUrl, mapsKey.apiKey, quizProgress.isSolved, scenes, selectedId, sourceMetadata]);
 
   const activeContent = hotspots.find((hotspot) => hotspot.id === activeContentId);
+  const projectHasKeys = scenes.some((scene) => sceneKeyHotspots(scene).length > 0);
   const uploadGuidance = UPLOAD_GUIDANCE[backgroundType] || UPLOAD_GUIDANCE.image;
   const sceneNameById = (id) => scenes.find((scene) => scene.id === id)?.name || "";
 
@@ -2277,6 +2582,8 @@ function Editor({ user, authLoading, accessToken }) {
             scenes={scenes}
             activeSceneId={activeScene.id}
             canEdit={canEdit}
+            sequential={isSequentialProject(scenes)}
+            onToggleSequential={setSequential}
             onSelect={switchScene}
             onAdd={addScene}
             onRename={renameScene}
@@ -2298,6 +2605,11 @@ function Editor({ user, authLoading, accessToken }) {
               >
                 <span>
                   #{index + 1} {hotspot.title || "제목 없는 핫스팟"}
+                  {isQuizHotspot(hotspot) && (
+                    <small className="hotspot-scene-link">
+                      <KeyRound size={11} /> 문제(열쇠)
+                    </small>
+                  )}
                   {hotspot.contentType === "scene" && (
                     <small className="hotspot-scene-link">
                       → {hotspot.targetSceneId ? sceneNameById(hotspot.targetSceneId) || "삭제된 장면" : "장면 미지정"}
@@ -2320,6 +2632,11 @@ function Editor({ user, authLoading, accessToken }) {
                 </div>
               )}
               {stage}
+              {!editingEnabled && projectHasKeys && (
+                <Button variant="ghost" className="quiz-reset" onClick={quizProgress.reset} title="미리보기에서 푼 문제를 모두 처음 상태로 되돌립니다">
+                  <RotateCcw size={15} /> 문제 풀이 초기화
+                </Button>
+              )}
               <SourceAttribution project={sourceMetadata} />
               {mapsKey.error && backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
             </div>
@@ -2365,7 +2682,21 @@ function Editor({ user, authLoading, accessToken }) {
           )}
         </aside>
       </div>
-      {!editingEnabled && activeContent && <HotspotModal hotspot={activeContent} onClose={() => setActiveContentId(null)} />}
+      {!editingEnabled && activeContent && (
+        <HotspotModal
+          hotspot={activeContent}
+          quiz={
+            isQuizHotspot(activeContent)
+              ? {
+                  solved: quizProgress.isSolved(activeScene.id, activeContent.id),
+                  onSolve: () => quizProgress.markSolved(activeScene.id, activeContent.id),
+                }
+              : null
+          }
+          onClose={() => setActiveContentId(null)}
+        />
+      )}
+      {lockNotice && <LockNotice gate={lockNotice} onClose={() => setLockNotice(null)} />}
       {streetViewImportOpen && (
         <GoogleStreetViewImportModal
           accessToken={accessToken}
@@ -2387,7 +2718,14 @@ function ViewProject() {
   const [activeId, setActiveId] = useState(null);
   const [activeSceneId, setActiveSceneId] = useState(null);
   const [shareUrl, setShareUrl] = useState("");
+  const [lockNotice, setLockNotice] = useState(null);
   const mapsKey = useRuntimeGoogleMapsBrowserKey();
+  const quizProgress = useQuizProgress(id);
+  const scene = project ? project.scenes.find((item) => item.id === activeSceneId) || project.scenes[0] : null;
+  const sceneHotspots = useMemo(
+    () => (scene ? decorateHotspotsWithLocks(scene, quizProgress.isSolved) : []),
+    [scene, quizProgress.isSolved],
+  );
 
   useEffect(() => {
     if (!id) {
@@ -2417,7 +2755,7 @@ function ViewProject() {
   if (!project) return <main className="centered muted">불러오는 중...</main>;
 
   const scenes = project.scenes;
-  const scene = scenes.find((item) => item.id === activeSceneId) || scenes[0];
+  const sequential = isSequentialProject(scenes);
   const sceneIndex = scenes.findIndex((item) => item.id === scene.id);
   const active = scene.hotspots.find((hotspot) => hotspot.id === activeId);
   const viewShareUrl = `${window.location.origin}/view/${project.id}`;
@@ -2431,6 +2769,11 @@ function ViewProject() {
   function handleHotspotSelect(hotspotId) {
     const hotspot = scene.hotspots.find((item) => item.id === hotspotId);
     if (hotspot?.contentType === "scene") {
+      const gate = sceneGate(scene, quizProgress.isSolved);
+      if (!gate.open) {
+        setLockNotice(gate);
+        return;
+      }
       if (hotspot.targetSceneId) goToScene(hotspot.targetSceneId);
       return;
     }
@@ -2439,7 +2782,7 @@ function ViewProject() {
 
   const props = {
     key: scene.id,
-    hotspots: scene.hotspots,
+    hotspots: sceneHotspots,
     editing: false,
     selectedId: null,
     onAdd: () => {},
@@ -2460,7 +2803,7 @@ function ViewProject() {
           )}
         </div>
         <div className="viewer-actions">
-          {scenes.length > 1 && sceneIndex > 0 && (
+          {!sequential && scenes.length > 1 && sceneIndex > 0 && (
             <Button variant="ghost" onClick={() => goToScene(scenes[0].id)}>
               <Layers size={16} /> 첫 장면
             </Button>
@@ -2488,7 +2831,7 @@ function ViewProject() {
           )}
           <SourceAttribution project={scene} />
           {mapsKey.error && scene.backgroundType === STREETVIEW_BACKGROUND_TYPE && <p className="streetview-error">{mapsKey.error}</p>}
-          {scenes.length > 1 && (
+          {!sequential && scenes.length > 1 && (
             <nav className="scene-nav" aria-label="장면 이동">
               {scenes.map((item, index) => (
                 <button
@@ -2505,7 +2848,18 @@ function ViewProject() {
           )}
         </div>
       </section>
-      {active && <HotspotModal hotspot={active} onClose={() => setActiveId(null)} />}
+      {active && (
+        <HotspotModal
+          hotspot={active}
+          quiz={
+            isQuizHotspot(active)
+              ? { solved: quizProgress.isSolved(scene.id, active.id), onSolve: () => quizProgress.markSolved(scene.id, active.id) }
+              : null
+          }
+          onClose={() => setActiveId(null)}
+        />
+      )}
+      {lockNotice && <LockNotice gate={lockNotice} onClose={() => setLockNotice(null)} />}
       {shareUrl && <ShareLinkModal title="보기 링크 공유" url={shareUrl} onClose={() => setShareUrl("")} />}
     </main>
   );
