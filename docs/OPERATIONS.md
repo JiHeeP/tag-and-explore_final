@@ -208,8 +208,12 @@ together. Every branch push gets a Vercel preview at
 
 ## Quiz keys and locked doors (열쇠/문)
 
-- A hotspot becomes a key when the inspector's "문제(열쇠)로 사용" is on and it
-  has at least one answer. Data: `hotspot.quiz = { enabled, question, answers[], hint }`.
+- A hotspot becomes a key when the inspector's "문제(열쇠)로 사용" is on and its
+  answer is set. Two types:
+  - 단답형 `type: "short"` (default): `answers[]`, at least one answer.
+  - 객관식 `type: "choice"`: `choices[]` (2–5, blanks are skipped) and
+    `correctIndex` pointing at a non-empty choice.
+  Data: `hotspot.quiz = { enabled, type, question, answers[], choices[], correctIndex, hint }`.
 - A scene's `장면 이동` hotspots open only after every key in that scene is
   solved. Scenes without keys are never locked.
 - Answers are compared after removing all spaces and ignoring case.

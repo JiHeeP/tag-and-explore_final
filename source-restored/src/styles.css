@@ -1953,3 +1953,80 @@ a {
 .quiz-reset {
   font-size: 13px;
 }
+
+/* 객관식 문제 */
+.quiz-choices {
+  display: grid;
+  gap: 8px;
+}
+
+.quiz-choice {
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  cursor: pointer;
+  display: flex;
+  font-size: 16px;
+  gap: 10px;
+  min-height: 46px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.quiz-choice:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.quiz-choice-mark {
+  color: var(--accent-strong);
+  flex: none;
+  font-weight: 800;
+}
+
+.quiz-choice.wrong {
+  cursor: default;
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.quiz-choice.correct {
+  background: oklch(0.93 0.07 150);
+  border-color: oklch(0.6 0.16 150);
+  font-weight: 700;
+}
+
+.quiz-choice:disabled:not(.wrong):not(.correct) {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.choice-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.choice-editor-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.inspector .choice-editor-row input[type="radio"] {
+  accent-color: oklch(0.6 0.16 150);
+  flex: none;
+  height: 18px;
+  min-height: 0;
+  width: 18px;
+}
+
+.choice-editor-row input:not([type="radio"]) {
+  flex: 1;
+  min-width: 0;
+}
+
+.quiz-toggle {
+  font-size: 14px !important;
+}

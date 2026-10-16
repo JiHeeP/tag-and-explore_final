@@ -106,7 +106,8 @@ function normalizeHotspots(hotspots = []) {
 }
 
 // 열쇠(문제) 핫스팟: 같은 장면의 열쇠를 모두 맞혀야 그 장면의 문(장면 이동) 핫스팟이 열린다.
-// 정답이 하나도 없는 문제는 학생이 풀 수 없으므로 열쇠로 치지 않는다.
+// 문제 유형은 단답형(type "short", answers[])과 객관식(type "choice", choices[] + correctIndex).
+// 정답이 정해지지 않은 문제는 학생이 풀 수 없으므로 열쇠로 치지 않는다.
 function normalizeQuizAnswer(value) {
   return String(value ?? "")
     .normalize("NFC")
@@ -130,8 +131,27 @@ function isCorrectQuizAnswer(quiz, input) {
   return Boolean(guess) && quizAnswers(quiz).includes(guess);
 }
 
+function quizType(quiz) {
+  return quiz?.type === "choice" ? "choice" : "short";
+}
+
+// 빈 보기는 건너뛰되, correctIndex가 원래 위치를 가리키도록 index를 함께 둔다.
+function quizChoiceOptions(quiz) {
+  return (Array.isArray(quiz?.choices) ? quiz.choices : [])
+    .map((text, index) => ({ text: String(text ?? "").trim(), index }))
+    .filter((option) => option.text);
+}
+
+function isQuizReady(quiz) {
+  if (quizType(quiz) === "choice") {
+    const options = quizChoiceOptions(quiz);
+    return options.length >= 2 && options.some((option) => option.index === quiz.correctIndex);
+  }
+  return quizAnswers(quiz).length > 0;
+}
+
 function isQuizHotspot(hotspot) {
-  return hotspot?.contentType !== "scene" && hotspot?.quiz?.enabled === true && quizAnswers(hotspot.quiz).length > 0;
+  return hotspot?.contentType !== "scene" && hotspot?.quiz?.enabled === true && isQuizReady(hotspot.quiz);
 }
 
 function sceneKeyHotspots(scene) {
@@ -1975,10 +1995,14 @@ function ModelStage({ modelUrl, hotspots, selectedId, editing, onAdd, onSelect }
   );
 }
 
+const CHOICE_MARKS = ["①", "②", "③", "④", "⑤"];
+
 function QuizBox({ quiz, solved, onSolve }) {
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
+  const [wrongChoices, setWrongChoices] = useState([]);
   const [showHint, setShowHint] = useState(false);
+  const isChoice = quizType(quiz) === "choice";
 
   function submit(event) {
     event.preventDefault();
@@ -1991,24 +2015,56 @@ function QuizBox({ quiz, solved, onSolve }) {
     }
   }
 
+  function pickChoice(index) {
+    if (solved) return;
+    if (index === quiz.correctIndex) {
+      setResult("correct");
+      onSolve();
+    } else {
+      setResult("wrong");
+      setWrongChoices((items) => (items.includes(index) ? items : [...items, index]));
+    }
+  }
+
   return (
     <form className={`quiz-box ${solved ? "solved" : ""}`} onSubmit={submit}>
       <div className="quiz-label">
-        <KeyRound size={16} /> 문제
+        <KeyRound size={16} /> {isChoice ? "객관식 문제" : "문제"}
       </div>
-      <p className="quiz-question">{quiz.question || "정답을 입력해 보세요."}</p>
-      <div className="quiz-input-row">
-        <input
-          aria-label="정답"
-          value={answer}
-          onChange={(event) => setAnswer(event.target.value)}
-          disabled={solved}
-          placeholder={solved ? "해결한 문제예요" : "정답 입력"}
-        />
-        <Button type="submit" disabled={solved || !answer.trim()}>
-          확인
-        </Button>
-      </div>
+      <p className="quiz-question">{quiz.question || (isChoice ? "알맞은 답을 고르세요." : "정답을 입력해 보세요.")}</p>
+      {isChoice ? (
+        <div className="quiz-choices" role="group" aria-label="보기">
+          {quizChoiceOptions(quiz).map((option, order) => {
+            const isAnswer = solved && option.index === quiz.correctIndex;
+            const isWrong = !solved && wrongChoices.includes(option.index);
+            return (
+              <button
+                type="button"
+                key={option.index}
+                className={`quiz-choice ${isAnswer ? "correct" : ""} ${isWrong ? "wrong" : ""}`}
+                disabled={solved || isWrong}
+                onClick={() => pickChoice(option.index)}
+              >
+                <span className="quiz-choice-mark">{CHOICE_MARKS[order] || order + 1}</span>
+                {option.text}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="quiz-input-row">
+          <input
+            aria-label="정답"
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            disabled={solved}
+            placeholder={solved ? "해결한 문제예요" : "정답 입력"}
+          />
+          <Button type="submit" disabled={solved || !answer.trim()}>
+            확인
+          </Button>
+        </div>
+      )}
       {solved && (
         <p className="quiz-feedback correct" role="status">
           <Check size={16} /> 정답!
@@ -2143,54 +2199,124 @@ function HotspotModal({ hotspot, quiz = null, onClose }) {
   );
 }
 
+const MAX_QUIZ_CHOICES = 5;
+
 function QuizEditor({ hotspot, onChange }) {
   const quiz = hotspot.quiz || {};
+  const type = quizType(quiz);
+  const choices = Array.isArray(quiz.choices) ? quiz.choices : [];
   // 쉼표를 입력하는 도중에도 글자가 사라지지 않도록 입력 원문은 따로 둔다.
   const [answersText, setAnswersText] = useState(() => (Array.isArray(quiz.answers) ? quiz.answers.join(", ") : ""));
-  const hasAnswers = quizAnswers(quiz).length > 0;
+  const ready = isQuizReady(quiz);
 
   function patch(next) {
     onChange({
       ...hotspot,
       quiz: {
         enabled: quiz.enabled === true,
+        type,
         question: quiz.question || "",
         answers: Array.isArray(quiz.answers) ? quiz.answers : [],
+        choices,
+        correctIndex: Number.isInteger(quiz.correctIndex) ? quiz.correctIndex : null,
         hint: quiz.hint || "",
         ...next,
       },
     });
   }
 
+  function selectType(nextType) {
+    // 객관식으로 처음 바꾸면 빈 보기 4개를 만들어 둔다.
+    patch(nextType === "choice" && !choices.length ? { type: nextType, choices: ["", "", "", ""] } : { type: nextType });
+  }
+
+  function updateChoice(index, text) {
+    patch({ choices: choices.map((choice, position) => (position === index ? text : choice)) });
+  }
+
+  function removeChoice(index) {
+    const correctIndex = quiz.correctIndex === index ? null : quiz.correctIndex > index ? quiz.correctIndex - 1 : quiz.correctIndex;
+    patch({ choices: choices.filter((_, position) => position !== index), correctIndex });
+  }
+
+  const warning =
+    type === "choice"
+      ? quizChoiceOptions(quiz).length < 2
+        ? "보기를 2개 이상 입력해야 열쇠로 동작합니다."
+        : "정답 보기를 동그라미로 골라야 열쇠로 동작합니다."
+      : "정답을 하나 이상 입력해야 열쇠로 동작합니다.";
+
   return (
     <div className="quiz-editor">
-      <label className="toggle-row">
+      <label className="toggle-row quiz-toggle">
         <input type="checkbox" checked={quiz.enabled === true} onChange={(event) => patch({ enabled: event.target.checked })} />
         <KeyRound size={15} /> 문제(열쇠)로 사용
       </label>
+      {quiz.enabled !== true && <p className="field-note">켜면 학생이 이 문제를 맞혀야 이 장면의 문(장면 이동)이 열립니다.</p>}
       {quiz.enabled === true && (
         <>
+          <label>문제 유형</label>
+          <div className="segmented">
+            <button className={type === "short" ? "active" : ""} onClick={() => selectType("short")}>
+              단답형
+            </button>
+            <button className={type === "choice" ? "active" : ""} onClick={() => selectType("choice")}>
+              객관식
+            </button>
+          </div>
           <label>질문</label>
           <input
             value={quiz.question || ""}
             onChange={(event) => patch({ question: event.target.value })}
-            placeholder="예: 근정전 천장의 용 발톱은 몇 개일까요?"
+            placeholder={type === "choice" ? "예: 정전에 모셔지지 않은 왕들은 어디에 있을까요?" : "예: 근정전 천장의 용 발톱은 몇 개일까요?"}
           />
-          <label>정답 (쉼표로 여러 개)</label>
-          <input
-            value={answersText}
-            onChange={(event) => {
-              setAnswersText(event.target.value);
-              patch({ answers: splitQuizAnswers(event.target.value) });
-            }}
-            placeholder="예: 7, 7개, 일곱"
-          />
+          {type === "choice" ? (
+            <>
+              <label>보기 (정답에 동그라미)</label>
+              <div className="choice-editor">
+                {choices.map((choice, index) => (
+                  <div className="choice-editor-row" key={index}>
+                    <input
+                      type="radio"
+                      name={`quiz-correct-${hotspot.id}`}
+                      aria-label={`보기 ${index + 1}을 정답으로`}
+                      checked={quiz.correctIndex === index}
+                      onChange={() => patch({ correctIndex: index })}
+                    />
+                    <input value={choice} onChange={(event) => updateChoice(index, event.target.value)} placeholder={`보기 ${index + 1}`} />
+                    <Button variant="ghost" title="보기 삭제" onClick={() => removeChoice(index)} disabled={choices.length <= 2}>
+                      <X size={14} />
+                    </Button>
+                  </div>
+                ))}
+                {choices.length < MAX_QUIZ_CHOICES && (
+                  <Button variant="secondary" onClick={() => patch({ choices: [...choices, ""] })}>
+                    <Plus size={14} /> 보기 추가
+                  </Button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <label>정답 (쉼표로 여러 개)</label>
+              <input
+                value={answersText}
+                onChange={(event) => {
+                  setAnswersText(event.target.value);
+                  patch({ answers: splitQuizAnswers(event.target.value) });
+                }}
+                placeholder="예: 7, 7개, 일곱"
+              />
+            </>
+          )}
           <label>힌트 (선택)</label>
           <input value={quiz.hint || ""} onChange={(event) => patch({ hint: event.target.value })} placeholder="예: 천장 가운데 황룡을 확대해 보세요." />
-          <p className={`field-note ${hasAnswers ? "" : "warning"}`}>
-            {hasAnswers
-              ? "이 장면의 열쇠를 모두 맞혀야 장면 이동 핫스팟이 열립니다. 띄어쓰기·대소문자는 무시하고 비교해요."
-              : "정답을 하나 이상 입력해야 열쇠로 동작합니다."}
+          <p className={`field-note ${ready ? "" : "warning"}`}>
+            {ready
+              ? type === "choice"
+                ? "이 장면의 열쇠를 모두 맞혀야 장면 이동 핫스팟이 열립니다. 학생이 틀린 보기는 흐리게 바뀌어요."
+                : "이 장면의 열쇠를 모두 맞혀야 장면 이동 핫스팟이 열립니다. 띄어쓰기·대소문자는 무시하고 비교해요."
+              : warning}
           </p>
         </>
       )}
@@ -2299,6 +2425,7 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
           </button>
         ))}
       </div>
+      {hotspot.contentType !== "scene" && <QuizEditor key={hotspot.id} hotspot={hotspot} onChange={onChange} />}
       {hotspot.contentType === "scene" && (
         <>
           <label>이동할 장면</label>
@@ -2337,7 +2464,6 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
       <textarea value={hotspot.description} onChange={(event) => onChange({ ...hotspot, description: event.target.value })} placeholder="학생에게 보여줄 설명을 입력하세요" />
       <label>링크 URL</label>
       <input value={hotspot.link || ""} onChange={(event) => onChange({ ...hotspot, link: event.target.value })} placeholder="https://..." />
-      {hotspot.contentType !== "scene" && <QuizEditor key={hotspot.id} hotspot={hotspot} onChange={onChange} />}
       {hotspot.contentType === "video" && (
         <>
           <label>영상 URL</label>
