@@ -227,7 +227,14 @@ together. Every branch push gets a Vercel preview at
 360 backgrounds render as a sphere with three.js. Hotspot `x,y` (%) are the
 position on the equirectangular image, so existing data keeps working.
 
-WebGL needs the image host to send CORS headers. The R2 bucket CORS rule must
-list every site origin (production, `tagandexplore.vercel.app`, the preview
-alias, localhost for testing) for `GET`. If the image cannot be loaded as a
-texture, the scene falls back to the old flat view with a notice.
+WebGL textures need CORS. Instead of adding every site domain to the R2 bucket
+CORS rule, the browser loads the panorama through `/api/pano-image?url=...`
+(same origin, so no CORS needed). That function only proxies images on the
+project's public R2 host (`R2_PUBLIC_BASE_URL` or the default `pub-…r2.dev`)
+and lets the Vercel CDN cache them.
+
+Load order: `/api/pano-image` → the R2 URL directly → the R2 URL with a
+cache-busting query → flat view with a notice. Vercel functions cannot return
+more than about 4.5 MB, so panoramas larger than ~4.4 MB skip the proxy and
+only work where the R2 CORS rule allows the site origin. Keep 360 uploads
+under 4 MB (for example 4096×2048 JPEG) to be safe.

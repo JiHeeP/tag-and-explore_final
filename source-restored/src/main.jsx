@@ -1266,6 +1266,15 @@ function withCacheBust(url) {
   return `${url}${url.includes("?") ? "&" : "?"}pano=1`;
 }
 
+// WebGL 텍스처는 CORS가 필요하다. 먼저 우리 사이트의 /api/pano-image를 거쳐 받고(같은 출처라 CORS 불필요),
+// 안 되면 원본 주소, 캐시를 피한 원본 주소 순서로 시도한다.
+function panoramaImageCandidates(url) {
+  const candidates = [];
+  if (/^https:\/\//i.test(url)) candidates.push(`/api/pano-image?url=${encodeURIComponent(url)}`);
+  candidates.push(url, withCacheBust(url));
+  return candidates;
+}
+
 const PANORAMA_MIN_FOV = 30;
 const PANORAMA_MAX_FOV = 90;
 
@@ -1338,13 +1347,16 @@ function PanoramaStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelec
       material.needsUpdate = true;
       setStatus("ready");
     };
-    // 같은 이미지가 CORS 헤더 없이 캐시돼 있으면 실패할 수 있어 한 번은 캐시를 피해 다시 받는다.
-    loader.load(imageUrl, applyTexture, undefined, () => {
+    const candidates = panoramaImageCandidates(imageUrl);
+    const tryLoad = (index) => {
       if (disposed) return;
-      loader.load(withCacheBust(imageUrl), applyTexture, undefined, () => {
-        if (!disposed) setStatus("error");
-      });
-    });
+      if (index >= candidates.length) {
+        setStatus("error");
+        return;
+      }
+      loader.load(candidates[index], applyTexture, undefined, () => tryLoad(index + 1));
+    };
+    tryLoad(0);
 
     const forward = new THREE.Vector3();
     const target = new THREE.Vector3();
