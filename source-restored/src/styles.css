@@ -592,6 +592,58 @@ a {
   width: 100%;
 }
 
+.panorama-stage {
+  cursor: grab;
+  min-height: 540px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.panorama-stage:active {
+  cursor: grabbing;
+}
+
+.panorama-stage.editing {
+  cursor: crosshair;
+}
+
+.panorama-canvas {
+  height: 540px;
+  width: 100%;
+}
+
+.panorama-canvas canvas {
+  border-radius: var(--radius-lg);
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.panorama-help {
+  background: rgb(17 24 39 / 0.72);
+  border-radius: 999px;
+  bottom: 14px;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 7px 12px;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.panorama-fallback {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  width: 100%;
+}
+
 .model-canvas canvas {
   display: block;
   height: 100%;
@@ -1374,6 +1426,8 @@ a {
 
 .viewer-page .model-stage,
 .viewer-page .model-canvas,
+.viewer-page .panorama-stage,
+.viewer-page .panorama-canvas,
 .viewer-page .streetview-dynamic-stage,
 .viewer-page .streetview-canvas {
   height: calc(100vh - 112px);
@@ -1451,6 +1505,8 @@ a {
 
   .viewer-page .model-stage,
   .viewer-page .model-canvas,
+  .viewer-page .panorama-stage,
+  .viewer-page .panorama-canvas,
   .viewer-page .streetview-dynamic-stage,
   .viewer-page .streetview-canvas {
     height: calc(100vh - 134px);

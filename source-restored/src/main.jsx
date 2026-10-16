@@ -1245,11 +1245,302 @@ function ImageStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, 
   );
 }
 
-function PanoramaStage(props) {
+// 360° 파노라마: 저장 좌표 x,y(%)는 equirectangular 이미지 위의 위치 그대로다.
+// x는 가로 0~360°, y는 위(0%)에서 아래(100%)까지. 반전된 구(three.js SphereGeometry)의
+// UV와 같은 규칙이라 텍스처와 핫스팟이 같은 지점에 놓인다.
+function panoramaDirection(x, y) {
+  const phi = (x / 100) * Math.PI * 2;
+  const theta = (y / 100) * Math.PI;
+  return new THREE.Vector3(Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta));
+}
+
+function panoramaPercent(direction) {
+  const unit = direction.clone().normalize();
+  let phi = Math.atan2(unit.z, unit.x);
+  if (phi < 0) phi += Math.PI * 2;
+  const theta = Math.acos(Math.max(-1, Math.min(1, unit.y)));
+  return { x: (phi / (Math.PI * 2)) * 100, y: (theta / Math.PI) * 100 };
+}
+
+function withCacheBust(url) {
+  return `${url}${url.includes("?") ? "&" : "?"}pano=1`;
+}
+
+const PANORAMA_MIN_FOV = 30;
+const PANORAMA_MAX_FOV = 90;
+
+function PanoramaStage({ imageUrl, hotspots, selectedId, editing, onAdd, onSelect, onMove }) {
+  const stageRef = useRef(null);
+  const mountRef = useRef(null);
+  const cameraRef = useRef(null);
+  const viewRef = useRef({ lon: Math.PI, lat: 0, fov: 75 });
+  const hotspotsRef = useRef(hotspots);
+  const pointersRef = useRef(new Map());
+  const gestureRef = useRef(null);
+  const markerPositionsRef = useRef({});
+  const [markerPositions, setMarkerPositions] = useState({});
+  const [status, setStatus] = useState("loading");
+  const [draggingId, setDraggingId] = useState(null);
+
+  useEffect(() => {
+    hotspotsRef.current = hotspots;
+  }, [hotspots]);
+
+  function percentFromClientPoint(clientX, clientY) {
+    const camera = cameraRef.current;
+    const mount = mountRef.current;
+    if (!camera || !mount) return null;
+    const rect = mount.getBoundingClientRect();
+    const pointer = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -(((clientY - rect.top) / rect.height) * 2 - 1));
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    return panoramaPercent(raycaster.ray.direction);
+  }
+
+  useEffect(() => {
+    setStatus("loading");
+    setMarkerPositions({});
+    markerPositionsRef.current = {};
+    const mount = mountRef.current;
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+    } catch {
+      setStatus("error");
+      return undefined;
+    }
+    const view = viewRef.current;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(view.fov, (mount.clientWidth || 800) / (mount.clientHeight || 480), 0.1, 1100);
+    cameraRef.current = camera;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(mount.clientWidth || 800, mount.clientHeight || 480);
+    mount.appendChild(renderer.domElement);
+
+    const geometry = new THREE.SphereGeometry(500, 64, 40);
+    geometry.scale(-1, 1, 1);
+    const material = new THREE.MeshBasicMaterial({ color: 0xf4f5f7 });
+    scene.add(new THREE.Mesh(geometry, material));
+
+    let disposed = false;
+    let texture = null;
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin("anonymous");
+    const applyTexture = (loaded) => {
+      if (disposed) {
+        loaded.dispose();
+        return;
+      }
+      texture = loaded;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      material.map = texture;
+      material.color.set(0xffffff);
+      material.needsUpdate = true;
+      setStatus("ready");
+    };
+    // 같은 이미지가 CORS 헤더 없이 캐시돼 있으면 실패할 수 있어 한 번은 캐시를 피해 다시 받는다.
+    loader.load(imageUrl, applyTexture, undefined, () => {
+      if (disposed) return;
+      loader.load(withCacheBust(imageUrl), applyTexture, undefined, () => {
+        if (!disposed) setStatus("error");
+      });
+    });
+
+    const forward = new THREE.Vector3();
+    const target = new THREE.Vector3();
+    const projectHotspots = () => {
+      camera.getWorldDirection(forward);
+      const next = {};
+      hotspotsRef.current.forEach((hotspot) => {
+        const direction = panoramaDirection(hotspot.x, hotspot.y);
+        const projected = direction.clone().multiplyScalar(100).project(camera);
+        const x = ((projected.x + 1) / 2) * 100;
+        const y = ((1 - projected.y) / 2) * 100;
+        const hidden = direction.dot(forward) <= 0.05 || x < -5 || x > 105 || y < -5 || y > 105;
+        next[hotspot.id] = { x, y, hidden };
+      });
+      const previous = markerPositionsRef.current;
+      const keys = Object.keys(next);
+      const changed =
+        keys.length !== Object.keys(previous).length ||
+        keys.some((id) => {
+          const before = previous[id];
+          const after = next[id];
+          return !before || before.hidden !== after.hidden || Math.abs(before.x - after.x) > 0.05 || Math.abs(before.y - after.y) > 0.05;
+        });
+      if (changed) {
+        markerPositionsRef.current = next;
+        setMarkerPositions(next);
+      }
+    };
+
+    let frame;
+    const animate = () => {
+      frame = requestAnimationFrame(animate);
+      const maxLat = Math.PI / 2 - 0.01;
+      view.lat = Math.max(-maxLat, Math.min(maxLat, view.lat));
+      if (camera.fov !== view.fov) {
+        camera.fov = view.fov;
+        camera.updateProjectionMatrix();
+      }
+      target.set(Math.cos(view.lat) * Math.cos(view.lon), Math.sin(view.lat), Math.cos(view.lat) * Math.sin(view.lon));
+      camera.lookAt(target);
+      renderer.render(scene, camera);
+      projectHotspots();
+    };
+    animate();
+
+    const handleWheel = (event) => {
+      event.preventDefault();
+      view.fov = Math.max(PANORAMA_MIN_FOV, Math.min(PANORAMA_MAX_FOV, view.fov + event.deltaY * 0.05));
+    };
+    mount.addEventListener("wheel", handleWheel, { passive: false });
+
+    const resizeObserver = new ResizeObserver(() => {
+      const width = mount.clientWidth || 800;
+      const height = mount.clientHeight || 480;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    });
+    resizeObserver.observe(mount);
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mount.removeEventListener("wheel", handleWheel);
+      texture?.dispose();
+      geometry.dispose();
+      material.dispose();
+      renderer.dispose();
+      mount.replaceChildren();
+      cameraRef.current = null;
+    };
+  }, [imageUrl]);
+
+  // 배경 드래그: 둘러보기 / 두 손가락: 확대 / 짧게 클릭(편집 중): 핫스팟 추가
+  function handlePointerDown(event) {
+    if (event.target.closest?.(".marker")) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const points = [...pointersRef.current.values()];
+    if (points.length === 2) {
+      gestureRef.current = { pinch: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y), fov: viewRef.current.fov, moved: true };
+    } else {
+      gestureRef.current = { startX: event.clientX, startY: event.clientY, moved: false };
+    }
+  }
+
+  function handlePointerMove(event) {
+    const previous = pointersRef.current.get(event.pointerId);
+    const gesture = gestureRef.current;
+    if (!previous || !gesture) return;
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const view = viewRef.current;
+    const points = [...pointersRef.current.values()];
+    if (points.length >= 2 && gesture.pinch) {
+      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1;
+      view.fov = Math.max(PANORAMA_MIN_FOV, Math.min(PANORAMA_MAX_FOV, (gesture.fov * gesture.pinch) / distance));
+      return;
+    }
+    if (Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 5) gesture.moved = true;
+    const height = mountRef.current?.clientHeight || 480;
+    const radiansPerPixel = THREE.MathUtils.degToRad(view.fov) / height;
+    view.lon -= (event.clientX - previous.x) * radiansPerPixel;
+    view.lat += (event.clientY - previous.y) * radiansPerPixel;
+  }
+
+  function handlePointerUp(event) {
+    const gesture = gestureRef.current;
+    const wasTracked = pointersRef.current.delete(event.pointerId);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (pointersRef.current.size > 0) {
+      const [remaining] = pointersRef.current.values();
+      gestureRef.current = { startX: remaining.x, startY: remaining.y, moved: true };
+      return;
+    }
+    gestureRef.current = null;
+    if (!wasTracked || !gesture || gesture.moved || !editing || status !== "ready") return;
+    const point = percentFromClientPoint(event.clientX, event.clientY);
+    if (point) onAdd(point.x, point.y);
+  }
+
+  function handlePointerCancel(event) {
+    pointersRef.current.delete(event.pointerId);
+    gestureRef.current = null;
+  }
+
+  function handleMarkerPointerDown(event, id) {
+    event.stopPropagation();
+    if (!editing) return;
+    setDraggingId(id);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleMarkerPointerMove(event, id) {
+    if (!editing || draggingId !== id) return;
+    event.stopPropagation();
+    const point = percentFromClientPoint(event.clientX, event.clientY);
+    if (point) onMove(id, point.x, point.y);
+  }
+
+  function handleMarkerPointerUp(event, id) {
+    event.stopPropagation();
+    if (draggingId !== id) return;
+    setDraggingId(null);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  }
+
+  if (status === "error") {
+    return (
+      <div className="panorama-fallback">
+        <ImageStage imageUrl={imageUrl} hotspots={hotspots} selectedId={selectedId} editing={editing} onAdd={onAdd} onSelect={onSelect} onMove={onMove} />
+        <p className="hint">360° 이미지를 입체로 불러오지 못해 평면으로 표시합니다. (이미지 저장소의 CORS 설정을 확인해 주세요.)</p>
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <ImageStage {...props} />
-      <p className="hint">현재 360° 자료는 평면 미리보기로 표시됩니다.</p>
+    <div
+      className={`stage panorama-stage ${editing ? "editing" : ""}`}
+      ref={stageRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+    >
+      <div ref={mountRef} className="panorama-canvas" />
+      {status !== "ready" && <div className="model-overlay-message">360° 이미지를 불러오는 중입니다...</div>}
+      {status === "ready" &&
+        hotspots.map((hotspot) => {
+          const position = markerPositions[hotspot.id];
+          const hidden = !position || position.hidden;
+          return (
+            <HotspotMarker
+              key={hotspot.id}
+              hotspot={hotspot}
+              selected={selectedId === hotspot.id}
+              onPointerDown={(event) => handleMarkerPointerDown(event, hotspot.id)}
+              onPointerMove={(event) => handleMarkerPointerMove(event, hotspot.id)}
+              onPointerUp={(event) => handleMarkerPointerUp(event, hotspot.id)}
+              onPointerCancel={() => setDraggingId(null)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect(hotspot.id);
+              }}
+              style={{
+                left: `${position?.x ?? 50}%`,
+                top: `${position?.y ?? 50}%`,
+                opacity: hidden ? 0 : 1,
+                pointerEvents: hidden ? "none" : "auto",
+              }}
+            />
+          );
+        })}
+      <div className="panorama-help">
+        {editing ? "드래그해서 둘러보고, 클릭해 핫스팟 추가 · 마커를 끌어 위치 이동" : "드래그해서 둘러보세요 · 휠이나 두 손가락으로 확대"}
+      </div>
     </div>
   );
 }

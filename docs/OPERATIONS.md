@@ -190,3 +190,44 @@ Manual check: open `https://tagandexplore.vercel.app/api/keepalive`.
 
 Optional: set `CRON_SECRET` in Vercel environment variables so only Vercel Cron can
 call `/api/keepalive` (the manual check above then returns 401).
+
+## Deploying a source change (B 방식)
+
+The site still serves the static bundle in `recovered-deploy/`. After editing
+`source-restored/`, run:
+
+```text
+./scripts/sync-deploy.sh
+```
+
+It builds `source-restored/`, copies the new `index-*.js` / `index-*.css` into
+`recovered-deploy/assets/`, and updates the bundle names in `index.html`,
+`recovered-deploy/index.html`, and `view/*/index.html`. Commit all of them
+together. Every branch push gets a Vercel preview at
+`dist-git-<branch-with-dashes>-jiheeparks-projects.vercel.app`.
+
+## Quiz keys and locked doors (열쇠/문)
+
+- A hotspot becomes a key when the inspector's "문제(열쇠)로 사용" is on and it
+  has at least one answer. Data: `hotspot.quiz = { enabled, question, answers[], hint }`.
+- A scene's `장면 이동` hotspots open only after every key in that scene is
+  solved. Scenes without keys are never locked.
+- Answers are compared after removing all spaces and ignoring case.
+- Solved keys are kept per browser tab in `sessionStorage`
+  (`projectId:sceneId:hotspotId`). Closing the tab resets them. The editor
+  preview has a `문제 풀이 초기화` button.
+- "순서대로 진행" (scene list) hides the student scene shortcuts and the
+  `첫 장면` button. Stored as `scenes[0].settings.sequential`; when unset it is
+  on whenever any key exists.
+- Answers are inside the project JSON, so a student using developer tools can
+  read them. Accepted for classroom use.
+
+## 360° scenes
+
+360 backgrounds render as a sphere with three.js. Hotspot `x,y` (%) are the
+position on the equirectangular image, so existing data keeps working.
+
+WebGL needs the image host to send CORS headers. The R2 bucket CORS rule must
+list every site origin (production, `tagandexplore.vercel.app`, the preview
+alias, localhost for testing) for `GET`. If the image cannot be loaded as a
+texture, the scene falls back to the old flat view with a notice.
