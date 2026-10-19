@@ -70,6 +70,7 @@ const icons = [
   { value: "sparkle", label: "Sparkle", icon: Sparkles },
   { value: "target", label: "Target", icon: CircleDot },
   { value: "door", label: "장면 이동", icon: DoorOpen },
+  { value: "key", label: "열쇠", icon: KeyRound },
 ];
 
 function normalizeHotspots(hotspots = []) {
@@ -1170,7 +1171,13 @@ function HotspotMarker({ hotspot, selected, onClick, style, ...props }) {
   const Icon =
     lockState === "locked" ? Lock : lockState === "open" ? DoorOpen : icons.find((item) => item.value === hotspot.icon)?.icon || Info;
   const BadgeIcon =
-    lockState === "solved" ? Check : lockState === "key" ? KeyRound : lockState === "locked" && isNumber ? Lock : null;
+    lockState === "solved"
+      ? Check
+      : lockState === "key" && (isNumber || hotspot.icon !== "key")
+        ? KeyRound
+        : lockState === "locked" && isNumber
+          ? Lock
+          : null;
   const title = hotspot.title || "Hotspot";
   return (
     <button
@@ -2209,9 +2216,15 @@ function QuizEditor({ hotspot, onChange }) {
   const [answersText, setAnswersText] = useState(() => (Array.isArray(quiz.answers) ? quiz.answers.join(", ") : ""));
   const ready = isQuizReady(quiz);
 
-  function patch(next) {
+  // 열쇠로 켜면 마커 아이콘도 열쇠로 바꾸고, 끄면 열쇠 아이콘을 기본 아이콘으로 되돌린다.
+  function toggleEnabled(enabled) {
+    patch({ enabled }, enabled ? "key" : hotspot.icon === "key" ? "info" : hotspot.icon);
+  }
+
+  function patch(next, icon = hotspot.icon) {
     onChange({
       ...hotspot,
+      icon,
       quiz: {
         enabled: quiz.enabled === true,
         type,
@@ -2249,7 +2262,7 @@ function QuizEditor({ hotspot, onChange }) {
   return (
     <div className="quiz-editor">
       <label className="toggle-row quiz-toggle">
-        <input type="checkbox" checked={quiz.enabled === true} onChange={(event) => patch({ enabled: event.target.checked })} />
+        <input type="checkbox" checked={quiz.enabled === true} onChange={(event) => toggleEnabled(event.target.checked)} />
         <KeyRound size={15} /> 문제(열쇠)로 사용
       </label>
       {quiz.enabled !== true && <p className="field-note">켜면 학생이 이 문제를 맞혀야 이 장면의 문(장면 이동)이 열립니다.</p>}
