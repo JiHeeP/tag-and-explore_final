@@ -2030,3 +2030,41 @@ a {
 .quiz-toggle {
   font-size: 14px !important;
 }
+
+/* 영상: 임베드가 막혔을 때 새 창으로 여는 링크 */
+.modal .video-open {
+  display: inline-block;
+  font-size: 0.95rem;
+  margin-top: -8px;
+}
+
+/* 그림을 못 불러왔을 때 */
+.media-error {
+  align-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: #475569;
+  display: flex;
+  justify-content: center;
+  min-height: 160px;
+  padding: 24px;
+  text-align: center;
+  width: 100%;
+}
+
+/* aspect-ratio를 모르는 구형 브라우저에서 영상 상자 높이가 0이 되는 문제 */
+@supports not (aspect-ratio: 16 / 9) {
+  .embed-frame {
+    height: 0;
+    padding-top: 56.25%;
+    position: relative;
+  }
+
+  .embed-frame iframe {
+    height: 100%;
+    left: 0;
+    top: 0;
+    width: 100%;
+    position: absolute;
+  }
+}

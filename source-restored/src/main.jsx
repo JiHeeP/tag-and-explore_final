@@ -554,7 +554,50 @@ function getUploadContentType(file) {
   return file.type || "application/octet-stream";
 }
 
-async function uploadFile(file) {
+// 태블릿에서 큰 사진이 안 보이는 문제를 막기 위해, 올리기 전에 브라우저에서 줄인다.
+// 긴 변 maxSide px 이하, 기본 JPEG(투명 PNG는 PNG 유지). 실패하면 원본을 그대로 올린다.
+const SHRINK_MAX_SIDE = { gallery: 1600, image: 2560, 360: 4096 };
+const SHRINK_SKIP_BYTES = 500 * 1024;
+
+async function shrinkImage(file, maxSide) {
+  if (!maxSide || !/^image\/(jpeg|png|webp)$/i.test(file.type)) return file;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const longSide = Math.max(bitmap.width, bitmap.height);
+    if (longSide <= maxSide && file.size <= SHRINK_SKIP_BYTES) {
+      bitmap.close?.();
+      return file;
+    }
+    const scale = Math.min(1, maxSide / longSide);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const context = canvas.getContext("2d");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+
+    let keepPng = false;
+    if (file.type === "image/png") {
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      for (let index = 3; index < data.length; index += 4) {
+        if (data[index] < 255) {
+          keepPng = true;
+          break;
+        }
+      }
+    }
+    const type = keepPng ? "image/png" : "image/jpeg";
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.82));
+    if (!blob || blob.size >= file.size) return file;
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+    return new File([blob], `${baseName}.${keepPng ? "png" : "jpg"}`, { type });
+  } catch {
+    return file;
+  }
+}
+
+async function uploadFile(originalFile, { maxSide = 0 } = {}) {
+  const file = await shrinkImage(originalFile, maxSide);
   const contentType = getUploadContentType(file);
   const shouldUploadDirectly = file.size > DIRECT_UPLOAD_THRESHOLD || /\.(glb|gltf)$/i.test(file.name);
 
@@ -662,6 +705,45 @@ function withYouTubeStart(src, start) {
   const url = new URL(src);
   url.searchParams.set("start", start);
   return url.toString();
+}
+
+function isVideoPageUrl(value) {
+  try {
+    const host = new URL(value).hostname.replace(/^www\./, "");
+    return ["youtu.be", "youtube.com", "m.youtube.com"].includes(host);
+  } catch {
+    return false;
+  }
+}
+
+// 임베드가 막혔을 때 새 창에서 열 주소. 유튜브는 일반 시청 주소로 바꾼다.
+function toWatchUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!/^https?:$/.test(url.protocol)) return "";
+    const host = url.hostname.replace(/^www\./, "");
+    if (["youtube.com", "m.youtube.com"].includes(host) && url.pathname.startsWith("/embed/")) {
+      const id = url.pathname.split("/").filter(Boolean)[1];
+      const start = url.searchParams.get("start");
+      return `https://www.youtube.com/watch?v=${id}${start ? `&t=${start}s` : ""}`;
+    }
+    if (!isVideoPageUrl(value)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function MediaImage({ src, alt }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="media-error" role="img" aria-label={alt}>
+        그림을 불러오지 못했어요. 선생님께 알려 주세요.
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} decoding="async" onError={() => setFailed(true)} />;
 }
 
 function Button({ variant = "primary", className = "", ...props }) {
@@ -2121,7 +2203,11 @@ function LockNotice({ gate, onClose }) {
 function HotspotModal({ hotspot, quiz = null, onClose }) {
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
   const embed = parseEmbed(hotspot.embedCode);
-  const videoEmbed = hotspot.contentType === "video" ? parseEmbed(hotspot.mediaUrl) : null;
+  // 영상 주소가 링크 칸에만 들어간 경우에도 영상으로 보여 준다.
+  const videoSource =
+    hotspot.contentType === "video" ? hotspot.mediaUrl || (isVideoPageUrl(hotspot.link) ? hotspot.link : "") : "";
+  const videoEmbed = videoSource ? parseEmbed(videoSource) : null;
+  const videoOpenUrl = videoSource ? toWatchUrl(videoSource) : "";
   const mediaItems = hotspot.mediaItems || [];
   const activeMedia = mediaItems[activeMediaIndex] || null;
   const hasManyMedia = mediaItems.length > 1;
@@ -2159,7 +2245,7 @@ function HotspotModal({ hotspot, quiz = null, onClose }) {
           <div className="modal-copy">
             <h2>{hotspot.title || "제목 없는 핫스팟"}</h2>
             {hotspot.description && <p>{hotspot.description}</p>}
-            {hotspot.link && (
+            {hotspot.link && hotspot.link !== videoSource && (
               <a className="external" href={hotspot.link} target="_blank" rel="noreferrer">
                 링크 열기
               </a>
@@ -2171,8 +2257,13 @@ function HotspotModal({ hotspot, quiz = null, onClose }) {
                 <iframe title={videoEmbed.title} src={videoEmbed.src} allow={videoEmbed.allow} allowFullScreen />
               </div>
             ) : (
-              hotspot.mediaUrl && <video controls src={hotspot.mediaUrl} />
+              videoSource && <video controls playsInline preload="metadata" src={videoSource} />
             ))}
+          {videoOpenUrl && (
+            <a className="external video-open" href={videoOpenUrl} target="_blank" rel="noreferrer">
+              영상이 안 나오면 여기를 눌러 유튜브에서 보기
+            </a>
+          )}
           {hotspot.contentType === "embed" && embed && (
             <div className="embed-frame">
               <iframe title={embed.title} src={embed.src} allow={embed.allow} allowFullScreen />
@@ -2181,7 +2272,7 @@ function HotspotModal({ hotspot, quiz = null, onClose }) {
           {hotspot.contentType === "gallery" && activeMedia && (
             <div className="carousel" aria-label="이미지 자료">
               <figure>
-                <img src={activeMedia.url} alt={activeMedia.caption || hotspot.title || ""} />
+                <MediaImage key={activeMedia.url} src={activeMedia.url} alt={activeMedia.caption || hotspot.title || ""} />
                 {activeMedia.caption && <figcaption>{activeMedia.caption}</figcaption>}
               </figure>
               {hasManyMedia && (
@@ -2357,7 +2448,7 @@ function Inspector({ hotspot, scenes = [], currentSceneId = null, onChange, onDe
   }
 
   async function addGalleryImages(files) {
-    const urls = await Promise.all(Array.from(files).map(uploadFile));
+    const urls = await Promise.all(Array.from(files).map((file) => uploadFile(file, { maxSide: SHRINK_MAX_SIDE.gallery })));
     onChange({
       ...hotspot,
       contentType: "gallery",
@@ -2852,7 +2943,7 @@ function Editor({ user, authLoading, accessToken }) {
     }
     setUploading(true);
     try {
-      const url = await uploadFile(file);
+      const url = await uploadFile(file, { maxSide: SHRINK_MAX_SIDE[uploadBackgroundType] || 0 });
       patchScene(
         {
           imageUrl: url,
